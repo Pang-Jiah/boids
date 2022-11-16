@@ -2,18 +2,16 @@
 # Under developing
 # authority: Pang Jiahuan
 # start time: 2022/11/7
-# last time: 2022/11/15
+# last time: 2022/11/16
 # end time: ~
 # python: 3.6
 
 '''
 vicsek model version description:
-    改成[3]中的模型，描述参考[2]，加入数据处理部分
+    改成[3]中的模型，描述参考[2]
 
 相对与上一版改进的说明：
-    取消了惯性，改用速度取平均,加入数据保存,但是这里保存只是考虑了角度值
-    结构也大改，将仿真作为类的一个方法，并将仿真数据与模型参数数据进行隔离
-    数据：角度，步数
+    加入领导节点，4种模式ABCD，修改了画图部分，
 '''
 #考虑：
 #   1. 数学计算采用[2]的方式？还是逐个元素进行相应的计算
@@ -24,6 +22,7 @@ vicsek model version description:
 #   6. 把视频保存放进data_Save()函数
 #   7. 全大写的变量定义为常量，这里希望进行略微的修改(为了步保证变量，后面加入小写)
 #   ·。版本修改3.8->3.6 (numpy 在python3.8 下的一些函数竟然在 python3.6中也好使？虽然代码上没有了相应的提示符 weird)
+#   ·。关于在方法函数中，成员变量是否提前先赋值，因为老是写Self就比较麻烦
 
 import numpy as np
 
@@ -45,6 +44,10 @@ class Vicsek():
             the linear size of the squrae shape cell where simulations are carried out. 
     >>> number: int  ( default: )
             the number of units. 
+    >>> leaderNum: int  ( default: )
+            the number of leader. 
+    >>> wLF: float  ( default: )
+            the interaction that leaders exert on followers. 
     >>> speed: float ( default: )
             speed of the units(constant temporarily).
     >>> senseRadiu: float ( default: )
@@ -68,20 +71,21 @@ class Vicsek():
         # Po: matrix of the positions of the units n x 2 x stepNum 位置矩阵
         # r: the radius that an unit can feel 1x1 所感知的半径
         # yeta: the strength of the noises 1x1 噪声
+        # Wx: the matrix of interaction strength nxn 
     大小写规范问题:小写为数值，大写开头为矩阵
 
     '''
-    def __init__(self, sizeOfArena: float, number: int, speed: float, senseRadiu: float,noises: float, name: str = "vicsek" ) -> None:
+    def __init__(self, sizeOfArena: float, number: int, leaderNum: int, wLF: float, speed: float, senseRadiu: float,noises: float, name: str = "vicsek" ) -> None:
         self.name = name
-        print(name," is born")
+        print(name,"is born")
         
         #####
-        self.parameters_Init(sizeOfArena,number,speed,senseRadiu,noises) #init parameters
+        self.parameters_Init(sizeOfArena=sizeOfArena,number = number,leaderNum = leaderNum,wLF = wLF,speed = speed, senseRadiu = senseRadiu, noises = noises) #init parameters
         
-
         pass
     
-    def parameters_Init(self, sizeOfArena: float, number:int, speed: float, senseRadiu: float, noises: float) -> None:
+
+    def parameters_Init(self, sizeOfArena: float, number:int, leaderNum: int, wLF: float, speed: float, senseRadiu: float, noises: float) -> None:
         '''
         Init parameters
 
@@ -91,12 +95,16 @@ class Vicsek():
                 the linear size of the squrae shape cell where simulations are carried out. 
         >>> number: int  ( default: )
                 the number of units. 
+        >>> leaderNum: int  ( default: )
+                the number of leader. 
+        >>> wLF: float  ( default: )
+                the interaction that leaders exert on followers. 
         >>> speed: float ( default: )
                 speed of the units(constant temporarily).
         >>> senseRadiu: float ( default: )
                 the radius that an unit can feel.
         >>> noises: float ( default: )
-                the strength of noises.
+                the strength of noises
 
         '''
         self.l = sizeOfArena
@@ -111,12 +119,21 @@ class Vicsek():
         self.Theta = rng.random((self.n,1))*2*np.pi 
         # init Velocity  V    
         self.Vo = np.hstack((self.v*np.cos(self.Theta),self.v*np.sin(self.Theta)))
+        # init interaction strength
+        self.Wx = np.ones((self.n,self.n))
+        self.leaderNum = leaderNum -1 # self.leaderNum is the max labels of leaders. 
+                                      # If there is one leader,  self.leaderNum = 1-1=0, meaning that [0] is a leader.
+                                      # If there are three, self.leaderNum = 3-1 = 2, meaning that [0][1][2] are leaders. 
+        self.wLF =wLF
+        self.Wx[:,0:self.leaderNum+1] = wLF # leader's effect on followers
+        self.Wx[0:self.leaderNum+1,:] = 0 # followers' effect on leader
+        self.Wx[0:self.leaderNum+1,0:self.leaderNum+1] = 1 
 
-        
+
         pass
 
 
-#================== animation part
+#================== simulation part
 
     def start(self) -> None:
         '''
@@ -126,17 +143,30 @@ class Vicsek():
         '''
         self.simulation_Init() # init file and folder 
 
-        fig = plt.figure() # 
-        plt.quiver(self.Po[:,0],self.Po[:,1],self.Vo[:,0],self.Vo[:,1])
+        leaderNum = self.leaderNum 
+        Po = self.Po
+        Vo = self.Vo
+
+        fig = plt.figure() #
+        # # plt.quiver(self.Po[:,0],self.Po[:,1],self.Vo[:,0],self.Vo[:,1],c = 'r')
+        # plt.quiver(Po[0:leaderNum+1,0],Po[0:leaderNum+1,1],Vo[0:leaderNum+1,0],Vo[0:leaderNum+1,1],width = 0.005) # init position
+        # plt.quiver(Po[leaderNum,0],Po[leaderNum,1],Vo[leaderNum,0],Vo[leaderNum,1],color = 'r',width = 0.005)
+        # plt.quiver(Po[leaderNum+1:,0],Po[leaderNum+1:,1],Vo[leaderNum+1:,0],Vo[leaderNum+1:,1],width = 0.005)
+        plt.quiver(Po[0:leaderNum+1,0],Po[0:leaderNum+1,1],Vo[0:leaderNum+1,0],Vo[0:leaderNum+1,1],color = 'r',width = 0.005) # init position
+        plt.quiver(Po[leaderNum+1:,0],Po[leaderNum+1:,1],Vo[leaderNum+1:,0],Vo[leaderNum+1:,1],width = 0.005)
+
         ani = animation.FuncAnimation(fig=fig, func=self._move, frames=self.stepNum-1, interval=20, blit=False, repeat=False) # frams-1是因为frame会传两个参数0
         plt.xlim((0, self.l))
         plt.ylim((0, self.l))
         ani.save('./vicsek.gif', fps=20)
+        
         self.pbar.finish()
         print(":) \"Video is saved successfully.\"",self.name,"said")
         self.data_Save()
         print(":) \"Data is saved successfully.\"",self.name,"said")
         # plt.show()
+        plt.close()# 否则一次画太多的图了
+
 
     def simulation_Init(self):
         '''
@@ -156,7 +186,7 @@ class Vicsek():
         # self.simulationTime = 10 # the duration of the simulation, unit: second
         # self.step = 0.1 # the duration of the step
         # self.stepNum = int(self.simulationTime/self.step)
-        self.stepNum = 100
+        self.stepNum = 200
         self.now = 0 # record what the step is now, start from 0~(stepNum-1)
         
         # space init
@@ -176,11 +206,16 @@ class Vicsek():
         # init folder
         now = time.localtime()
         timeStr = time.strftime("%Y-%m-%d_%H-%M-%S",now)
-        self.folderName = timeStr + '_' + str(self.n) + 'units_' + \
-                    str(self.stepNum) + 'StepNumber_' + \
-                    str(self.yeta) + 'Noise_' + \
+        self.folderName = timeStr + '_' + \
+                    str(self.n) + 'units_' + \
+                    str(self.leaderNum+1) + 'leaders_' + \
+                    str(self.wLF) + 'interaction_' + \
+                    str(self.stepNum) + 'stepNumber_' + \
+                    str(self.yeta) + 'noises_' + \
                     str(self.l) + 'size_' + \
                     str(self.v) + 'speed'
+
+
         self.mypath = os.path.split(__file__)[0]
         os.chdir(self.mypath)
         if not os.path.isdir(self.folderName):
@@ -205,7 +240,6 @@ class Vicsek():
         pass
 
 
-
     def _move(self, frameNumber):
         '''
         # WARN!!!!!!!!!!
@@ -217,19 +251,24 @@ class Vicsek():
             frameNumber: 
                 the number of the frame, 
         '''
-        # print("\n___framsjlasjldjla",self.now)
         Po, Theta = self.update()
+        leaderNum = self.leaderNum
+        Vo = self.Vo
+        # print(self.now)
         self.ThetaSaved[:,self.now] = Theta.reshape((self.n, ))
         self.pbar.update(self.now+1)
         self.now +=1
         plt.cla()
         plt.xlim((0, self.l))
         plt.ylim((0, self.l))
-        plt.quiver(Po[:,0],Po[:,1],self.Vo[:,0],self.Vo[:,1])
+
+        plt.quiver(Po[0:leaderNum+1,0],Po[0:leaderNum+1,1],Vo[0:leaderNum+1,0],Vo[0:leaderNum+1,1],color = 'r',width = 0.005) # init position
+        plt.quiver(Po[leaderNum+1:,0],Po[leaderNum+1:,1],Vo[leaderNum+1:,0],Vo[leaderNum+1:,1],width = 0.005)
+        # plt.quiver(Po[:,0],Po[:,1], self.Vo[:,0], self.Vo[:,1])
         pass
 
 
-    #================ update data
+#=================== update data
 
     def update(self):
         '''
@@ -240,9 +279,11 @@ class Vicsek():
         Parameters:
 
         '''
+
         dx = np.subtract.outer(self.Po[:, 0], self.Po[:, 0])
         dy = np.subtract.outer(self.Po[:, 1], self.Po[:, 1]) 
         distance = np.hypot(dx, dy)
+        
         # periodic boundary
         Ax = (distance >= 0) * (distance <= self.r) # >=0是包括自己 
         #                                                     condition
@@ -257,17 +298,33 @@ class Vicsek():
         # print(Dx)
         Lx = Dx-Ax
         Id = np.identity(self.n)
+
         #  weight matrix
         #  Wx is a nonnegative asymmetric matrix whose wij element determines the interaction strength that particle i exerts on particle j
-        Wx= np.ones((self.n,self.n))
-        WxA = Ax * Wx
+        WxA = Ax * self.Wx
 
         # noise
         rng = np.random.default_rng()
-        Noises = rng.random((self.n,1))*self.yeta - self.yeta/2
-        
-        
-        
+        Noises = rng.random((self.n,1))*self.yeta/2 - self.yeta
+
+
+        '''
+        When the past wont influence the futher. 4 situations [4]. Defalt: the D situation. 
+        '''
+        #A
+        # ThetaRandom = rng.random((self.n,1))*2*np.pi
+        # self.Vo[:,:]  = np.hstack((self.v*np.cos(ThetaRandom[:]),self.v*np.sin(ThetaRandom[:])))
+        #B
+        # ThetaRandom = rng.random((self.n,1))*2*np.pi
+        # self.Vo[self.leaderNum+1:, :]  = np.hstack((self.v*np.cos(ThetaRandom[self.leaderNum+1:]),self.v*np.sin(ThetaRandom[self.leaderNum+1:])))
+        #C
+        # ThetaRandom = rng.random((self.n,1))*2*np.pi
+        # self.Vo[0:self.leaderNum+1, :]  = np.hstack((self.v*np.cos(ThetaRandom[0:self.leaderNum+1]),self.v*np.sin(ThetaRandom[0:self.leaderNum+1])))
+        #D
+        # nothing
+
+
+        # calculate
         self.Theta = np.arctan2(np.matmul(WxA,self.Vo[:,1].reshape(self.n,1)),\
                                 np.matmul(WxA,self.Vo[:,0].reshape(self.n,1))+0.000000000001) 
         self.Theta = self.Theta + Noises
@@ -291,14 +348,20 @@ class Vicsek():
         return self.Po, self.Theta
 
 
-#%%
+
 if __name__ == "__main__":
     #使用类和对象的方式，这样可以同时跑多个参数
-    vicsek = Vicsek(sizeOfArena= 100.0, number= 200, speed=.5, senseRadiu=3, noises=.05,name="vicsek_A")
-    vicsek2 = Vicsek(sizeOfArena= 100.0, number= 400, speed=.5, senseRadiu=3, noises=.05,name="vicsek_AA")
-    vicsek.start()
-    ##########
-    vicsek2.start()
+    #stepNum = 2
+#     wlfList = [1.0, 1.5, 2.2, 3.2, 4.6, 6.8]
+    wlfList = [1.5, 1.0]
+    # noise
+    for j in wlfList:
+        wlf = j
+        for i in range(5):
+            yeta = i * 0.2* np.pi
+            Vicsek(sizeOfArena= 10.0, number= 4, leaderNum=1, wLF=j, speed=.05, senseRadiu=3, noises=yeta, name="vicsek_yeta:"+str(yeta)+"wLF:"+str(wlf)).start()
+        pass
+    
 
 
 
@@ -306,6 +369,5 @@ if __name__ == "__main__":
 [1] Vicsek, T., Czirók, A., Ben-Jacob, E., Cohen, I. & Shochet, O. Novel Type of Phase Transition in a System of Self-Driven Particles. Phys. Rev. Lett. 75, 1226-1229 (1995).
 [2] Cucker, F. & Smale, S. Emergent Behavior in Flocks. IEEE Trans. Automat. Contr. 52, 852-862 (2007).
 [3] Sattari, S. et al. Modes of information flow in collective cohesion. SCIENCE ADVANCES 14 (2022).
-
 
 '''

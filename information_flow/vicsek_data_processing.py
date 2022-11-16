@@ -2,7 +2,7 @@
 # Under developing
 # authority: Pang Jiahuan
 # start time: 2022/10/30
-# last time: 2022/11/15
+# last time: 2022/11/16
 # end time: ~
 #information flow: mutual information; 
 #                  time-delayed mutual information; 
@@ -11,18 +11,21 @@
 # python: 3.6
 '''
 version description:
-    初步实现所要熵的计算,intrinsic information flow的正确性还有待考究
+    完成某些类型图的绘制与数据的读取
 '''
 #考虑：
 #   ·. 取和不为1
 #   ·.intrinsic information flow
+#   *.数据读取顺序和图中顺序的确认(first thing to do)
+#   *.数据读取和数据存储的安排
 import h5py
 import numpy as np
 import os
 
 import itertools as it #排列组合用
 import dit      
-
+import matplotlib.pyplot as plt
+import progressbar
 class H5PY_Processor():
     '''
     A Class for basic HDF5 file operation
@@ -45,7 +48,7 @@ class H5PY_Processor():
         self.f = h5py.File(fileName, authority)
         pass
     def close(self):
-        print("文件被释放")
+        # print("文件被释放")
         self.f.close()
         pass
     def search_Deep(self,path: str,name:str = '/') -> None:
@@ -91,7 +94,7 @@ class H5PY_Processor():
             print(name,"[D]", np.shape(dog))#没有长度的dataset可能会被看作是group，因此len()失效
 
 class Information_Processor():
-    def __init__(self, Theta, stepNum) -> None:
+    def __init__(self, Theta, stepNum,x,y) -> None:
         self.Theta = Theta
         self.stepNum = stepNum
         self.discretize()
@@ -101,7 +104,7 @@ class Information_Processor():
             a = ''.join(e)
             self.alphabet[a] = 0.0   
         # print(self.alphabet)  
-        self.count_Distribution(x=0,y=1)
+        self.count_Distribution(x=x,y=y)
         self.calculate_Information()
         pass
 
@@ -134,7 +137,7 @@ class Information_Processor():
         '''
         # count
         for i in range(self.stepNum-1):
-            index = str(int(self.bins[i][x])) + str(int(self.bins[i][y])) + str(int(self.bins[i+1][y]))
+            index = str(int(self.bins[x][i])) + str(int(self.bins[y][i])) + str(int(self.bins[y][i+1]))
             # print(index)
             self.alphabet[index] += 1/(self.stepNum-1)
 
@@ -145,10 +148,6 @@ class Information_Processor():
         self.XYZ.set_rv_names('XYZ')
         # print(self.XYZ)
         pass
-
-
-
-        
 
     def mutual_Information(self):
         '''
@@ -186,7 +185,6 @@ class Information_Processor():
         tE = dit.multivariate.coinformation(self.XYZ, 'XZ','Y')
         return tE
 
-
     def intrinsic_Information_Flow(self):
         '''
         calculate time intrinsic_Information_Flow (IIF)
@@ -213,8 +211,6 @@ class Information_Processor():
         '''
         sHIF = tE - iIF
         return sHIF
-
-
 
     def synergistic_Information_Flow(self, tDMI, iIF):
         '''
@@ -244,26 +240,174 @@ class Information_Processor():
         self.sYIF = self.synergistic_Information_Flow(tDMI=self.tDMI, iIF=self.iIF)
         pass
 
+    def get_Information(self):
+        '''
+            Collect all the quantities we need in a `dict`.
+        '''
+        informationDict = {
+            "mutual_information": self.mI,
+            "time_delayed_mutual_information": self.tDMI,
+            "transfer_entropy":self.tE,
+            "intrinsic_Information_Flow":self.iIF,
+            "shared_information_flow":self.sHIF,
+            "synergistic_information_flow":self.sYIF,
+        }
+
+        return informationDict
+
+def draw_Heat_Map(infAll:list, infName:str, figSize:tuple):
+    '''
+    Draw the heat map    
+    
+    Parameters
+    ---
+    >>> infAll: List [{}]
+        all the information quantities
+    >>> infName: str
+        the information quantity you want to draw
+    >>> figSize:
+        the size of the heat map
+    
+    Attention
+    ---
+    the figSize and axis need to be carefully check mannually 
+    '''
+    size = np.shape(infAll)[0]
+    data = np.zeros(size)
+    i = 0
+    for i in range(size):
+        data[i] = infAll[i][infName]
+   
+    data = data.reshape(figSize)
+    # print(data)
+    #显示图像
+    #这里的cmap='bone'等价于plt.cm.bone
+    plt.imshow(data,interpolation = 'nearest',cmap = 'Reds' ,origin = 'lower')
+    #显示右边的栏
+    plt.colorbar(shrink = .5)
+    # plt.colorbar(shrink = .92)
+    plt.xticks(np.arange(0,5,1),np.array([0, 0.2, 0.4, 0.6, 0.8]))
+    plt.yticks(np.arange(0,2,1),np.array([1.5, 1.0]))
+    figName = "./" + infName + ".jpg"
+    plt.savefig(figName)
+    plt.close()
+
+def draw_Linear(infAll:list, infName:str, figSize:tuple):
+    '''
+    Draw the Linear 
+    
+    Parameters
+    ---
+    >>> infAll: List [{}]
+        all the information quantities
+    >>> infName: str
+        the information quantity you want to draw
+    >>> figSize: (the data for drawing a line, others)
+        
+    
+    Attention!!!!!!!!!!!!!!!!!
+    ---
+    the figSize and axis need to be carefully check mannually 
+    label should be changed
+    '''
+    size = np.shape(infAll)[0]
+    data = np.zeros(size)
+    i = 0
+    for i in range(size):
+        data[i] = infAll[i][infName]
+    data = data.reshape(figSize)
+    # print(data)
+
+    #显示图像
+    #这里的cmap='bone'等价于plt.cm.bone
+    plt.plot(np.array([0, 0.2, 0.4, 0.6, 0.8]), data[0,:],label='W_lf='+str(1.5))
+    plt.plot(np.array([0, 0.2, 0.4, 0.6, 0.8]), data[1,:],label='W_lf='+str(1.0))
+
+    # plt.xticks(np.arange(0,5,1),np.array([0, 0.2, 0.4, 0.6, 0.8]))
+    # plt.yticks(np.arange(0,2,1),np.array([1.0, 1.5]))
+    figName = "./" + "different W_lf _" + infName + "_varing with noises"+ ".jpg"
+    plt.legend()
+    plt.savefig(figName)
+    plt.close()
+
 if __name__ == "__main__":
     # enter the absolute path of this python file
     mypath = os.path.split(__file__)[0]
     os.chdir(mypath)
 
-    # enter the folder containing the data
-    folderName = "2022-11-14_22-11-36_200units_100StepNumber_0.05Noise_100.0size_0.5speed" #想要处理的所在数据名称
-    os.chdir(folderName)
-    # get the file
-    f = H5PY_Processor("vicsekData.hdf5","r")
-    # f.search_Deep("/")
-    processor = Information_Processor(Theta= f.f["angleSaved"][:,:],stepNum=f.f['stepNum'][0])
-    f.close()
 
-    print("multual_Information:",processor.mI)
-    print("time_Delayed_Mutual_Information:",processor.tDMI)
-    print("transfer_Entropy:",processor.tE)
-    print("intrinsic_Information_Flow:",processor.iIF)
-    print("shared_Information_Flow:",processor.sHIF)
-    print("synergistic_Information_Flow:",processor.sYIF)
+
+    # prograssbar part
+    fileNumber = 10#
+    widgets = ['Progress: ',progressbar.Percentage(), ' ', progressbar.Bar('#'),' ', progressbar.Timer(),
+           ' ', progressbar.ETA(), ' ', progressbar.FileTransferSpeed()]
+    pbar = progressbar.ProgressBar(widgets=widgets, max_value=fileNumber).start()
+    fileNow = 0
+
+
+    '''
+    Accessing data part
+    # 先为了实现功能，每组数据的排序通过文件名称中的时间来实现，时间从过去到未来-》先 noises 从小到大，再 wFT从小到大
+    # 这样虽然方便但是太过于脆弱了
+    '''
+    os.chdir("D")# 不同的类
+    infAll = []
+    
+    for fileName in os.listdir("."):
+        pbar.update(fileNow+1)
+        fileNow += 1
+
+        # print(fileName)
+        os.chdir(fileName)  # 当前目录路径
+
+        # get the file
+        f = H5PY_Processor("vicsekData.hdf5","r")
+        # f.search_Deep("/")
+        inf = Information_Processor(Theta= f.f["angleSaved"][:,:],stepNum=f.f['stepNum'][0],x=0,y=1).get_Information()
+        # print(inf["time_delayed_mutual_information"])
+        infAll.append(inf)# collect the information of all the situation in a list
+        f.close()
+        os.chdir('..')
+
+    os.chdir('..')
+    print(":) Data read and processed successfully")
+    
+
+
+    '''
+        figure part
+
+        informationDict = {
+        "mutual_information": self.mI,
+        "time_delayed_mutual_information": self.tDMI,
+        "transfer_entropy":self.tE,
+        "intrinsic_Information_Flow":self.iIF,
+        "shared_information_flow":self.sHIF,
+        "synergistic_information_flow":self.sYIF,
+        }
+    '''
+
+    dataSavedPath = "result"
+    if not os.path.isdir(dataSavedPath):
+        os.mkdir(dataSavedPath)
+    os.chdir(dataSavedPath)
+
+    draw_Heat_Map(infAll=infAll,infName="time_delayed_mutual_information",figSize=(2,5))
+    draw_Linear(infAll=infAll,infName="time_delayed_mutual_information",figSize=(2,5))
+
+    
+    print(":) An artist have finished his\her\its job")
+    
+    os.chdir('..')
+
+    # print("multual_Information:",processor.mI)
+    # print("time_Delayed_Mutual_Information:",processor.tDMI)
+    # print("transfer_Entropy:",processor.tE)
+    # print("intrinsic_Information_Flow:",processor.iIF)
+    # print("shared_Information_Flow:",processor.sHIF)
+    # print("synergistic_Information_Flow:",processor.sYIF)
+
+# ABCD->读取所有的数据和信息 如何存储这些信息呢？
 
 '''
 reference:
