@@ -2,30 +2,40 @@
 # Under developing
 # authority: Pang Jiahuan
 # start time: 2022/10/30
-# last time: 2022/11/16
+# last time: 2022/11/19
 # end time: ~
 #information flow: mutual information; 
 #                  time-delayed mutual information; 
 #                  transfer entropy; 
 #                  shared, intrinsic, syn.. entropy.
 # python: 3.6
+
 '''
 version description:
-    完成某些类型图的绘制与数据的读取
+    完成某些类型图的绘制与数据的读取，格式的一些修改
 '''
 #考虑：
 #   ·. 取和不为1
 #   ·.intrinsic information flow
 #   *.数据读取顺序和图中顺序的确认(first thing to do)
-#   *.数据读取和数据存储的安排
+#   *.数据读取和数据存储的安排有些笨重
+
 import h5py
 import numpy as np
 import os
 
-import itertools as it #排列组合用
-import dit      
-import matplotlib.pyplot as plt
+import itertools as it # sorting
+import dit # information theory
+import matplotlib.pyplot as plt 
 import progressbar
+
+'''
+#Attention !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+文件排序方式为:名称+增序
+
+'''
+
 class H5PY_Processor():
     '''
     A Class for basic HDF5 file operation
@@ -68,7 +78,7 @@ class H5PY_Processor():
 
         Examples:
         ---
-            self.search_Deep(path = '/')
+        >>> self.search_Deep(path = '/')
         
         '''
         dog = self.f[path] # a group or dataset
@@ -130,7 +140,7 @@ class Information_Processor():
 
         Parameters
         --
-        >>> x,y: int
+        x,y: int
             the index of vairable
 
         
@@ -144,7 +154,7 @@ class Information_Processor():
         alphabetKeys  = list(self.alphabet.keys()) # seperate the keys form dict
         alphabetValue = list(self.alphabet.values()) # seperate the value from dict
 
-        self.XYZ = dit.Distribution(alphabetKeys, alphabetValue)
+        self.XYZ = dit.Distribution(alphabetKeys, alphabetValue) # get the joint distribution
         self.XYZ.set_rv_names('XYZ')
         # print(self.XYZ)
         pass
@@ -202,8 +212,8 @@ class Information_Processor():
         
         Parameters
         ---
-        >>> tE: TE
-        >>> iIF: IIF
+        tE: TE
+        iIF: IIF
 
         Return
         ---
@@ -218,8 +228,8 @@ class Information_Processor():
         
         Parameters
         ---
-        >>> tDMI: TDMI
-        >>> iIF: IIF
+        tDMI: TDMI
+        iIF: IIF
 
         Return
         ---
@@ -242,7 +252,7 @@ class Information_Processor():
 
     def get_Information(self):
         '''
-            Collect all the quantities we need in a `dict`.
+        Collect all the quantities we need in a `dict`.
         '''
         informationDict = {
             "mutual_information": self.mI,
@@ -255,18 +265,20 @@ class Information_Processor():
 
         return informationDict
 
-def draw_Heat_Map(infAll:list, infName:str, figSize:tuple):
+def draw_Heat_Map(infAll:list, infName:str, figSize:tuple, flag: int):
     '''
     Draw the heat map    
     
     Parameters
     ---
-    >>> infAll: List [{}]
+    infAll: List [{}]
         all the information quantities
-    >>> infName: str
+    infName: str
         the information quantity you want to draw
-    >>> figSize:
+    figSize: tuple
         the size of the heat map
+    flag: int
+        0: Leader-> Follower; 1: Follower->Leader
     
     Attention
     ---
@@ -277,7 +289,7 @@ def draw_Heat_Map(infAll:list, infName:str, figSize:tuple):
     i = 0
     for i in range(size):
         data[i] = infAll[i][infName]
-   
+    
     data = data.reshape(figSize)
     # print(data)
     #显示图像
@@ -286,9 +298,12 @@ def draw_Heat_Map(infAll:list, infName:str, figSize:tuple):
     #显示右边的栏
     plt.colorbar(shrink = .5)
     # plt.colorbar(shrink = .92)
-    plt.xticks(np.arange(0,5,1),np.array([0, 0.2, 0.4, 0.6, 0.8]))
-    plt.yticks(np.arange(0,2,1),np.array([1.5, 1.0]))
-    figName = "./" + infName + ".jpg"
+    plt.xticks(np.arange(0,11,1),np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0]))
+    plt.yticks(np.arange(0,7,1), np.array([10, 6.8, 4.6, 3.2, 2.2, 1.5, 1.0]))
+    if flag == 0:
+        figName = "./" + infName + "_leader_to_follower" + "_yeta_Wlf"+ ".jpg"
+    else:
+        figName = "./" + infName + "_follower_to_leader" +"_yeta_Wlf"+ ".jpg"
     plt.savefig(figName)
     plt.close()
 
@@ -312,7 +327,7 @@ def draw_Linear(infAll:list, infName:str, figSize:tuple):
     '''
     size = np.shape(infAll)[0]
     data = np.zeros(size)
-    i = 0
+
     for i in range(size):
         data[i] = infAll[i][infName]
     data = data.reshape(figSize)
@@ -320,12 +335,12 @@ def draw_Linear(infAll:list, infName:str, figSize:tuple):
 
     #显示图像
     #这里的cmap='bone'等价于plt.cm.bone
-    plt.plot(np.array([0, 0.2, 0.4, 0.6, 0.8]), data[0,:],label='W_lf='+str(1.5))
-    plt.plot(np.array([0, 0.2, 0.4, 0.6, 0.8]), data[1,:],label='W_lf='+str(1.0))
+    plt.plot(np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0]), data[0,:],label='N_f ='+str(3))
+    plt.plot(np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0]), data[1,:],label='N_f ='+str(9))
 
     # plt.xticks(np.arange(0,5,1),np.array([0, 0.2, 0.4, 0.6, 0.8]))
     # plt.yticks(np.arange(0,2,1),np.array([1.0, 1.5]))
-    figName = "./" + "different W_lf _" + infName + "_varing with noises"+ ".jpg"
+    figName = "./" + "different W_lf _" + infName + "_varing with Follower"+ ".jpg"
     plt.legend()
     plt.savefig(figName)
     plt.close()
@@ -338,7 +353,9 @@ if __name__ == "__main__":
 
 
     # prograssbar part
-    fileNumber = 10#
+    os.chdir("D")# 存放数据的文件夹，注意要在python 文件的同级目录下
+    fileNumber = np.shape(os.listdir("."))[0]
+    # print(fileNumber)
     widgets = ['Progress: ',progressbar.Percentage(), ' ', progressbar.Bar('#'),' ', progressbar.Timer(),
            ' ', progressbar.ETA(), ' ', progressbar.FileTransferSpeed()]
     pbar = progressbar.ProgressBar(widgets=widgets, max_value=fileNumber).start()
@@ -350,27 +367,35 @@ if __name__ == "__main__":
     # 先为了实现功能，每组数据的排序通过文件名称中的时间来实现，时间从过去到未来-》先 noises 从小到大，再 wFT从小到大
     # 这样虽然方便但是太过于脆弱了
     '''
-    os.chdir("D")# 不同的类
-    infAll = []
+    infAllLF = []
+    infAllFL = []
     
     for fileName in os.listdir("."):
-        pbar.update(fileNow+1)
-        fileNow += 1
+        try:
+            pbar.update(fileNow+1)
+            fileNow += 1
+            
+            # print(fileName)
+            os.chdir(fileName)  # 当前目录路径
 
-        # print(fileName)
-        os.chdir(fileName)  # 当前目录路径
-
-        # get the file
-        f = H5PY_Processor("vicsekData.hdf5","r")
-        # f.search_Deep("/")
-        inf = Information_Processor(Theta= f.f["angleSaved"][:,:],stepNum=f.f['stepNum'][0],x=0,y=1).get_Information()
-        # print(inf["time_delayed_mutual_information"])
-        infAll.append(inf)# collect the information of all the situation in a list
-        f.close()
-        os.chdir('..')
+            # get the file
+            f = H5PY_Processor("vicsekData.hdf5","r")
+            # f.search_Deep("/")
+            
+            # in the condition one leader
+            #leader->follower
+            infLF = Information_Processor(Theta= f.f["angleSaved"][:,:],stepNum=f.f['stepNum'][0],x=0,y=1).get_Information()
+            infAllLF.append(infLF)# collect the information of all the situation in a list
+            #follower->leader
+            # infFL = Information_Processor(Theta= f.f["angleSaved"][:,:],stepNum=f.f['stepNum'][0],x=1,y=0).get_Information()
+            # infAllFL.append(infFL)# collect the information of all the situation in a list
+            f.close()
+            os.chdir('..')
+        except:
+            print(fileName)
 
     os.chdir('..')
-    print(":) Data read and processed successfully")
+    print(" :) Data read and processed successfully")
     
 
 
@@ -392,11 +417,34 @@ if __name__ == "__main__":
         os.mkdir(dataSavedPath)
     os.chdir(dataSavedPath)
 
-    draw_Heat_Map(infAll=infAll,infName="time_delayed_mutual_information",figSize=(2,5))
-    draw_Linear(infAll=infAll,infName="time_delayed_mutual_information",figSize=(2,5))
+
+    # draw_Heat_Map(infAll=infAllLF,infName="time_delayed_mutual_information",figSize=(2,11),flag=0)
+
+    #leader to follower
+    draw_Heat_Map(infAll=infAllLF,infName="mutual_information",figSize=(7,11),flag=0)
+    draw_Heat_Map(infAll=infAllLF,infName="time_delayed_mutual_information",figSize=(7,11),flag=0)
+    draw_Heat_Map(infAll=infAllLF,infName="transfer_entropy",figSize=(7,11),flag=0)
+    draw_Heat_Map(infAll=infAllLF,infName="intrinsic_Information_Flow",figSize=(7,11),flag=0)
+    draw_Heat_Map(infAll=infAllLF,infName="shared_information_flow",figSize=(7,11),flag=0)
+    draw_Heat_Map(infAll=infAllLF,infName="synergistic_information_flow",figSize=(7,11),flag=0)
+    # #follower to leader
+    # draw_Heat_Map(infAll=infAllFL,infName="mutual_information",figSize=(7,11),flag=1)
+    # draw_Heat_Map(infAll=infAllFL,infName="time_delayed_mutual_information",figSize=(7,11),flag=1)
+    # draw_Heat_Map(infAll=infAllFL,infName="transfer_entropy",figSize=(7,11),flag=1)
+    # draw_Heat_Map(infAll=infAllFL,infName="intrinsic_Information_Flow",figSize=(7,11),flag=1)
+    # draw_Heat_Map(infAll=infAllFL,infName="shared_information_flow",figSize=(7,11),flag=1)
+    # draw_Heat_Map(infAll=infAllFL,infName="synergistic_information_flow",figSize=(7,11),flag=1)
+
+
+    # draw_Linear(infAll=infAllLF,infName="mutual_information",figSize=(2,11))
+    # draw_Linear(infAll=infAllLF,infName="time_delayed_mutual_information",figSize=(2,11))
+    # draw_Linear(infAll=infAllLF,infName="transfer_entropy",figSize=(2,11))
+    # draw_Linear(infAll=infAllLF,infName="intrinsic_Information_Flow",figSize=(2,11))
+    # draw_Linear(infAll=infAllLF,infName="shared_information_flow",figSize=(2,11))
+    # draw_Linear(infAll=infAllLF,infName="synergistic_information_flow",figSize=(2,11))
 
     
-    print(":) An artist have finished his\her\its job")
+    print(":) An artist has finished his\her\its job")
     
     os.chdir('..')
 
