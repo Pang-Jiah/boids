@@ -1,28 +1,9 @@
-# vicsek model simulation [1]
-# Under developing
-# authority: Pang Jiahuan
-# start time: 2022/11/7
-# last time: 2022/12/3
-# end time: ~
+# developing...
+# starting time: 2022/11/7
+# last time: 2024/
+# ending time: ~
 # python: 3.6
 
-'''
-vicsek model version description:
-    vicsek model is developed into the boids model
-
-the improvement in contrast with last version:
-    match the time in reality
-    
-'''
-#consideration：
-#   ·。python version: 3.8->3.6 (numpy 在python3.8 下的一些函数竟然在 python3.6中也好使？虽然代码上没有了相应的提示符 weird)
-#   ·。fps and velocity
-#   ·。第一帧数据没缺失，但是画面缺失-》frameNumber有两个0，且第一个0不显示画面
-#   ·。为什么有些代码突然就不好使了呢 #仔细排查separation 和 cohesion 和alignment
-#   ·。nan问题 
-#   ·。注意dx
-#   ·。矩阵乘法问题
-#   ·。leader index or leader number
 
 import numpy as np
 
@@ -34,6 +15,22 @@ import os
 import h5py
 import progressbar
 
+
+def tanh(x:np.ndarray):
+
+    # tanh 
+    # nonlinear_x = (2/(1+np.exp(-2*x))-1)*np.pi 
+    # nonlinear_x=np.tanh(x)*np.pi #
+    # nonlinear_x=np.tanh(x*2/np.pi)*np.pi #
+    
+    # singmoid 
+    # nonlinear_x = (1/(1+np.exp(-x))-1/2)*2*np.pi
+    
+    # linear
+    nonlinear_x = x
+    return nonlinear_x
+
+
 class Vicsek():
     '''
     class of Vicsek model, each class is a group of Vicsek model
@@ -44,7 +41,7 @@ class Vicsek():
         the linear size of the squrae shape cell where simulations are carried out. 
     number: int  ( default: )
         the number of units. 
-    leaderNum: int  ( default: )
+    numOfLeaders: int  ( default: )
         the number of leader. 
     wLF: float  ( default: )
         the interaction that leaders exert on followers. 
@@ -68,24 +65,24 @@ class Vicsek():
         # v: value of the velocities of the units  1x1 速度大小
         # Theta: directions nx1 角度(每个unit运动的不同)
         # Ve: velocities of the units nx2
-        # Po: matrix of the positions of the units n x 2 x stepNum 位置矩阵
+        # Po: matrix of the positions of the units n x 2 x numOfSteps 位置矩阵
         # r: the radius that an unit can feel 1x1 所感知的半径
-        # yeta: the strength of the noises 1x1 噪声
+        # eta: the strength of the noises 1x1 噪声
         # Wx: the matrix of interaction strength nxn 
     大小写规范问题:小写为数值，大写开头为矩阵
 
     '''
-    def __init__(self, sizeOfArena: float, number: int, leaderNum: int, wLF: float, speed: float, senseRadius: float,noises: float, name: str = "vicsek" ) -> None:
+    def __init__(self, sizeOfArena: float, number: int, numOfLeaders: int, wLF: list[float], speed: float, senseRadius: float,noises: float, name: str = "vicsek" ) -> None:
         self.name = name
         print(name,"is born")
-        
         #####
-        self.parameters_Init(sizeOfArena=sizeOfArena,number = number,leaderNum = leaderNum,wLF = wLF,speed = speed, senseRadius = senseRadius, noises = noises) #init parameters
+        self.parameters_Init(sizeOfArena=sizeOfArena,number = number,numOfLeaders = numOfLeaders,wLF = wLF,speed = speed, senseRadius = senseRadius, noises = noises) #init parameters
         
         pass
     
 
-    def parameters_Init(self, sizeOfArena: float, number:int, leaderNum: int, wLF: float, speed: float, senseRadius: float, noises: float) -> None:
+
+    def parameters_Init(self, sizeOfArena: float, number:int, numOfLeaders: int, wLF: list[float], speed: float, senseRadius: float, noises: float) -> None:
         '''
         Init parameters
 
@@ -95,7 +92,7 @@ class Vicsek():
            the linear size of the squrae shape cell where simulations are carried out. 
         number: int  ( default: )
             the number of units. 
-        leaderNum: int  ( default: )
+        numOfLeaders: int  ( default: )
             the number of leader. 
         wLF: float  ( default: )
             the interaction that leaders exert on followers. 
@@ -111,7 +108,7 @@ class Vicsek():
         self.n = number
         self.v = speed
         self.r = senseRadius
-        self.yeta = noises
+        self.eta = noises
         # init Position P
         rng = np.random.default_rng()
         self.Po = rng.random((self.n,2))*self.l # random()-> float interval [0,1]
@@ -121,109 +118,175 @@ class Vicsek():
         self.Ve = np.hstack((self.v*np.cos(self.Theta),self.v*np.sin(self.Theta)))
         # init interaction strength
         self.Wx = np.ones((self.n,self.n))
-        self.leaderNum = leaderNum -1 # self.leaderNum is the max labels of leaders. 
-                                      # If there is one leader,  self.leaderNum = 1-1=0, meaning that [0] is a leader.
-                                      # If there are three, self.leaderNum = 3-1 = 2, meaning that [0][1][2] are leaders. 
+        self.indexOfLeader = numOfLeaders -1 # self.indexOfLeader is the max labels of leaders. 
+                                      # If there is one leader,  self.indexOfLeader = 1-1=0, meaning that [0] is a leader.
+                                      # If there are three, self.indexOfLeader = 3-1 = 2, meaning that [0][1][2] are leaders. 
+          
         self.wLF =wLF
-        self.Wx[:,0:self.leaderNum+1] = wLF # leader's effect on followers
-        self.Wx[0:self.leaderNum+1,:] = 0 # followers' effect on leader
-        self.Wx[0:self.leaderNum+1,0:self.leaderNum+1] = 0
+        # wLF = [self.wLF, 1] # for two leader cases
+        # self.Wx[self.indexOfLeader+1:,0:self.indexOfLeader+1] = wLF  # leader's effect on followers
 
+        self.Wx[0:self.indexOfLeader+1,self.indexOfLeader+1:] = 0 # followers' effect on leader
+        self.Wx[0:self.indexOfLeader+1,0:self.indexOfLeader+1] = 0 #  leader on leader
+        self.Wx[self.indexOfLeader+1:,self.indexOfLeader+1:] =0 # ; follower on follower
+        followerIndex = np.arange(self.indexOfLeader+1,self.n)
+        for i in followerIndex: #follower on itself
+            self.Wx[i,i]=1
+
+        for i in range(self.indexOfLeader+1): #leader on itself
+            self.Wx[self.indexOfLeader+1:,i] = wLF[i]  # leader's effect on followers # leader 之间没有相互影响
+            self.Wx[i,i]=wLF[i]
+                # print(i)
+        print("wx\n", self.Wx[:5,:5])
+        
         # force the first leader's initial position and velocity
         # temporarily for rotation
-        self.leader_Init(leaderIndex = self.leaderNum)
-        
+        self.leader_Init(indexOfLeader = self.indexOfLeader)
 
+        self.frameFlag = True
+        self.rstar = [3, -1]
 
         pass
 
 
+
 #================== simulation part
 
-    def start(self,stepNum) -> None:
+    def start(self,numOfSteps) -> None:
         '''
         start the simulation
         
         Parameters:
-        stepNum: int (default:)
+        numOfSteps: int (default:)
             the number of steps.
         '''
-        self.simulation_Init(stepNum) # init file and folder 
-
+        self.simulation_Init(numOfSteps) # init file and folder 
+        self.InteractionSaved[:,:] = self.Wx.reshape((self.n, self.n ))
         fig = plt.figure() #
 
 
-        ani = animation.FuncAnimation(fig=fig, func=self._move, frames=self.stepNum-1, interval=int(1/self.fps*1000), blit=False, repeat=False) # frams-1是因为frame会传两个参数0
-
-        ani.save('./vicsek.gif',fps=self.fps)
+        ani = animation.FuncAnimation(fig=fig, func=self._move, frames=self.numOfSteps, interval=int(1/self.fps*1000), blit=False, repeat=False) #
+        ani.save('./vicsek.mp4',fps=self.fps)
         
         self.pbar.finish()
-        print(":) \"Video is saved successfully.\"",self.name,"said")
+        print(":) \"Video is saved successfully.\"")
         self.data_Save()
-        print(":) \"Data is saved successfully.\"",self.name,"said")
+        print(":) \"Data is saved successfully.\"")
         # plt.show()
         plt.close()# 否则一次画太多的图了
 
     def _move(self, frameNumber):
         '''
-        update the animation
+        update the animation, plot
 
         Parameters:
         ---
             frameNumber: 
                 the number of the frame, 
         '''
-        Po, Theta, Ax = self.update()
-        leaderNum = self.leaderNum
-        Ve = self.Ve
-    
+        self.now = frameNumber
+        if self.frameFlag == True:
+            self.frameFlag = False
+            return
+
+        
+        
+        indexOfLeader = self.indexOfLeader
+        Ve = self.Ve[:,:]
+        Po = self.Po[:,:]
+        Theta = self.Theta[:]
         colorBoard = ['b','c','m','y','r','g','k','olive','purple','turquoise','lightpink']
         n = self.n
-        PoA = np.hstack(((Po[:,0]*Ax[:,0]).reshape(n,1), (Po[:,1]*Ax[:,0]).reshape(n,1)))
+        # PoA = np.hstack(((Po[:,0]*Ax[:,0]).reshape(n,1), (Po[:,1]*Ax[:,0]).reshape(n,1)))
         # print(self.now)
         # save data
+
         self.ThetaSaved[:,self.now] = Theta.reshape((self.n, ))
         self.VelocitySaved[:,:,self.now] = Ve.reshape((self.n, 2, ))
+        self.PositionSaved[:,:,self.now] = Po.reshape((self.n, 2, ))
+        
 
 
 
         self.pbar.update(self.now+1)
-        self.now +=1
         plt.cla()
 
         titleName = 'n=' + str(self.n) + \
-                    ', n_L=' + str(self.leaderNum+1) +\
-                    ', w_lf=' +str(self.wLF) +  \
-                    ', step=' + str(self.stepNum)  + \
-                    ', noises=' +str(self.yeta) +  \
+                    ', $w_{lf}$=' +str(self.wLF) +  \
+                    ', step=' + str(self.numOfSteps)  + \
+                    ', $\\eta$=' +str(format(self.eta/np.pi,'.1f')) +"$\\pi$"+  \
                     ', L=' +str(self.l) +  \
                     ', r=' +str(self.r) +  \
-                    ', v=' + str(self.v)  
+                    ', v=' + str(self.v) + \
+                    ', $r^{*}$=' + str(self.rstar[0:self.indexOfLeader+1]) 
+        
         plt.title(titleName)
         plt.xlim((0, self.l))
         plt.ylim((0, self.l))
         now = str(self.now)
         plt.xlabel(xlabel="$t_n = $"+now,size = 15) # 真实与显示可能略微有些误差
-        # 画与领导节点相邻的线
-        for j in range(leaderNum+1):
-            PoA = np.hstack(((Po[:,0]*Ax[:,j]).reshape(n,1), (Po[:,1]*Ax[:,j]).reshape(n,1)))
-            for i in PoA:
-                if i[0] !=0. and i[1] != 0.:
-                    # plt.plot(np.array([PoA[0,0],i[0]]),np.array([PoA[0,1],i[1]]),color='blue')
-                    plt.plot(np.array([PoA[j,0],i[0]]),np.array([PoA[j,1],i[1]]),color=colorBoard[j],linestyle='--',alpha = 0.5,linewidth=0.8)
-        plt.quiver(Po[0:leaderNum+1,0],Po[0:leaderNum+1,1],Ve[0:leaderNum+1,0],Ve[0:leaderNum+1,1],color = 'r',width = 0.005) # init position
-        plt.quiver(Po[leaderNum+1:,0],Po[leaderNum+1:,1],Ve[leaderNum+1:,0],Ve[leaderNum+1:,1],width = 0.005)
+        # 画与领导节点相邻的线 draw the lines between leaders and the followers affected by the leaders
+        # try:
+        #     for j in range(indexOfLeader+1):
+        #         PoA = np.hstack(((Po[:,0]*self.Ax[:,j]).reshape(n,1), (Po[:,1]*self.Ax[:,j]).reshape(n,1)))
+        #         for i in PoA:
+        #             if i[0] !=0. and i[1] != 0.:
+        #                 # plt.plot(np.array([PoA[0,0],i[0]]),np.array([PoA[0,1],i[1]]),color='blue')
+        #                 plt.plot(np.array([PoA[j,0],i[0]]),np.array([PoA[j,1],i[1]]),color=colorBoard[j],linestyle='--',alpha = 0.5,linewidth=0.8)
+        # except:
+        #     pass
+        
+        
+        # draw the quivers
+        # plt.quiver(Po[0:indexOfLeader+1,0],Po[0:indexOfLeader+1,1],Ve[0:indexOfLeader+1,0],Ve[0:indexOfLeader+1,1],color = 'r',width = 0.005,scale = 50,scale_units='width') # init position
+        if indexOfLeader>=0:
+            plt.quiver(Po[0:indexOfLeader+1,0],Po[0:indexOfLeader+1,1],np.cos(Theta[0:indexOfLeader+1]),np.sin(Theta[0:indexOfLeader+1]),color = 'r',width = 0.005) # init position
+        # if self.n >self.indexOfLeader+1:
+        #     plt.quiver(Po[indexOfLeader+1,0],Po[indexOfLeader+1,1],Ve[indexOfLeader+1,0],Ve[indexOfLeader+1,1],color = 'b',width = 0.005)
+        #     if self.n >self.indexOfLeader+2:
+        #         plt.quiver(Po[indexOfLeader+2:,0],Po[indexOfLeader+2:,1],Ve[indexOfLeader+2:,0],Ve[indexOfLeader+2:,1],width = 0.005)
+        
+        if self.n >self.indexOfLeader+1:
+        #     plt.quiver(Po[indexOfLeader+2:,0],Po[indexOfLeader+2:,1],Ve[indexOfLeader+2:,0],Ve[indexOfLeader+2:,1],width = 0.005)
+            plt.quiver(Po[indexOfLeader+1:,0], Po[indexOfLeader+1:,1], np.cos(Theta[indexOfLeader+1:]), np.sin(Theta[indexOfLeader+1:]), width = 0.005)
         # plt.quiver(Po[:,0],Po[:,1], self.Ve[:,0], self.Ve[:,1])
+
+        # 编号 serial number
+        for i in range(np.shape(Po)[0]):
+            plt.text(Po[i,0]-0.1, Po[i,1]+0.1, str(i), color="brown")
+        
         pass
+        
+        #绘制轨迹 draw the previous trajectory
+        trajL = 15 # trajectory length
+        scatterSize = np.ones((self.n,trajL))*0.5 # trajectory size
+        if self.now > trajL:
+            plt.scatter(self.PositionSaved[:,0,self.now-trajL:self.now], self.PositionSaved[:,1,self.now-trajL:self.now], marker='.', s=scatterSize[:,:])#画轨迹点
+        else:
+            plt.scatter(self.PositionSaved[:,0,:self.now], self.PositionSaved[:,1,:self.now], marker='.', s=scatterSize[:,:self.now])#画轨迹点
 
 
-    def simulation_Init(self,stepNum):
+        Po, Theta, Ax, Noises= self.update()
+        self.Ax = Ax
+        self.AdjacentSaved[:,:,self.now] = Ax.reshape((self.n, self.n, ))
+
+        # if self.now == 0:
+        #     self.NoisesSaved[:,self.now] = np.zeros(self.n)#初始没有噪声
+        # if self.now != (self.numOfSteps-1):
+        #     self.NoisesSaved[:,self.now+1] = Noises.reshape((self.n, ))
+        self.NoisesSaved[:,self.now] = np.zeros(self.n)
+
+
+
+
+
+    def simulation_Init(self,numOfSteps):
         '''
         Init things which are used for simulation
 
         Parameters:
         --
-        stepNum: int (default:)
+        numOfSteps: int (default:)
             the number of steps.
 
         Section
@@ -239,10 +302,10 @@ class Vicsek():
         #------------
         # self.simulationTime = 10 # the duration of the simulation, unit: second
         # self.step = 0.1 # the duration of the step
-        # self.stepNum = int(self.simulationTime/self.step)
+        # self.numOfSteps = int(self.simulationTime/self.step)
 
-        self.stepNum = stepNum
-        self.now = 0 # record what the step is now, start from 0~(stepNum-1)
+        self.numOfSteps = numOfSteps
+        self.now = 0 # record what the step is now, start from 0~(numOfSteps-1)
         '''
         self.timeResolution:
             The time period between adjacent video frames is 1/20.
@@ -255,33 +318,37 @@ class Vicsek():
         # space init
         #----------------
         # space for data to be saved
-        self.ThetaSaved = np.zeros((self.n, self.stepNum))
-        self.VelocitySaved = np.zeros((self.n,2,self.stepNum))
-
+        self.ThetaSaved = np.zeros((self.n, self.numOfSteps))
+        self.VelocitySaved = np.zeros((self.n,2,self.numOfSteps))
+        self.AdjacentSaved = np.zeros(((self.n,self.n,self.numOfSteps)))
+        self.InteractionSaved = np.zeros(((self.n,self.n)))
+        self.PositionSaved = np.zeros((self.n,2,self.numOfSteps))
+        self.angleInformationSaved = np.zeros((self.n,self.n,self.numOfSteps))
+        self.NoisesSaved = np.zeros((self.n,self.numOfSteps))
         # progressbar init
         #------------
         widgets = ['Progress: ',progressbar.Percentage(), ' ', progressbar.Bar('#'),' ', progressbar.Timer(),
            ' ', progressbar.ETA(), ' ', progressbar.FileTransferSpeed()]
-        self.pbar = progressbar.ProgressBar(widgets=widgets, max_value=self.stepNum).start()
+        self.pbar = progressbar.ProgressBar(widgets=widgets, max_value=self.numOfSteps).start()
         # self.pbar = progressbar.ProgressBar().start()
 
         # file init
         #-----------
         # init folder
-        now = time.localtime()
-        timeStr = time.strftime("%Y-%m-%d_%H-%M-%S",now)
+        time_now = time.localtime()
+        timeStr = time.strftime("%Y-%m-%d_%H-%M",time_now)
         self.folderName = timeStr + '_' + \
-                    str(self.n) + 'units_' + \
-                    str(self.leaderNum+1) + 'leaders_' + \
+                    str(self.n) + 'particles_' + \
+                    str(self.indexOfLeader+1) + 'leaders_' + \
                     str(self.wLF) + 'interaction_' + \
-                    str(self.stepNum) + 'stepNumber_' + \
-                    str(self.yeta) + 'noises_' + \
-                    str(self.l) + 'size_' + \
+                    str(self.numOfSteps) + 'steps_' + \
+                    str(format(self.eta/np.pi,'.1f')) + 'pi noises_' + \
                     str(self.r) + 'radius_' + \
-                    str(self.v) + 'speed'
+                    str(self.l) + 'size_' + \
+                    str(self.rstar[0:self.indexOfLeader+1]) + 'rstar_' + \
+                    str(self.v) + 'speed'#!!!!!!!!!!!!!!!!
 
-
-        mypath = os.path.split(__file__)[0]
+        mypath = os.path.abspath(".")
         os.chdir(mypath)
         if not os.path.isdir(self.folderName):
             os.mkdir(self.folderName)
@@ -292,28 +359,45 @@ class Vicsek():
         fileName = "vicsekData.hdf5"
         self.file = h5py.File(fileName, 'w-')
 
-
     def data_Save(self):
         '''
         save data
         '''
-        stepNum = np.array([self.stepNum])
-        timeResolution = np.array([self.timeResolution])
 
-        self.file.create_dataset('timeResolution', data=timeResolution,    compression='gzip', compression_opts=9)
-        self.file.create_dataset('stepNum',       data=stepNum,            compression='gzip', compression_opts=9)
-        self.file.create_dataset('angleSaved',    data=self.ThetaSaved,    compression='gzip', compression_opts=9)
-        self.file.create_dataset('velocitySaved', data=self.VelocitySaved, compression='gzip', compression_opts=9)
+        self.file.create_dataset('angleSaved',       data=self.ThetaSaved,       compression='gzip', compression_opts=9)
+        self.file.create_dataset('velocitySaved',    data=self.VelocitySaved,    compression='gzip', compression_opts=9)
+        self.file.create_dataset('positionSaved',    data=self.PositionSaved,    compression='gzip', compression_opts=9)
+        self.file.create_dataset('adjacentSaved',    data=self.AdjacentSaved,    compression='gzip', compression_opts=9)
+        self.file.create_dataset('interactionSaved', data=self.InteractionSaved, compression='gzip', compression_opts=9)
+        self.file.create_dataset('angleInformationSaved', data=self.angleInformationSaved, compression='gzip', compression_opts=9)
+        self.file.create_dataset('NoisesSaved', data=self.NoisesSaved, compression='gzip', compression_opts=9)
+   
+        numOfSteps = np.array([self.numOfSteps])
+        timeResolution = np.array([self.timeResolution])
+        wLF = np.array([self.wLF])
+        numOfLeaders = np.array([self.indexOfLeader+1])
+        noiseStrength = np.array([self.eta])
+        numOfNodes = np.array([self.n])
+        sizeOfArena = np.array([self.l])
+
+        groupParameter = self.file.create_group("parameters")
+        groupParameter.create_dataset('timeResolution',  data=timeResolution,     compression='gzip',   compression_opts=9)
+        groupParameter.create_dataset('numOfSteps',         data=numOfSteps,            compression='gzip',   compression_opts=9)
+        groupParameter.create_dataset('wLF',             data=wLF,                compression='gzip',   compression_opts=9)
+        groupParameter.create_dataset('numOfLeaders',       data=numOfLeaders,          compression='gzip',   compression_opts=9)
+        groupParameter.create_dataset('noiseStrength',   data=noiseStrength,      compression='gzip',   compression_opts=9)
+        groupParameter.create_dataset('numOfNodes',        data=numOfNodes,           compression='gzip',   compression_opts=9)
+        groupParameter.create_dataset('sizeOfArena',        data=sizeOfArena,           compression='gzip',   compression_opts=9)
+        
+        
         self.file.close()
         os.chdir("..")
         pass
 
 
 
-
-
 #=================== update data
-    def alignment(self,WxA):
+    def alignment(self, WxA, distance):
         '''
         Compute the alignment. Weighted average the velocity of adjacent units.
         
@@ -327,76 +411,32 @@ class Vicsek():
         '''
         Ve = self.Ve
         n = self.n
-        # as |V| = 3, we can take Ve as the direction
-        WAlignment = np.ones((n,2)) # aligment weight matrix
-        VeA = np.matmul( WxA, WAlignment*Ve) # velocity
+        senseRadius = self.r
 
-        # unitize
-        VeASqrt = np.sqrt(((VeA*VeA).sum(axis=1)).reshape(n,1))
-        VeA = np.divide(VeA,VeASqrt,where= VeASqrt!=0)
-        return VeA
 
-    def cohesion(self, WxA, dx, dy,di):
-        '''
-        Compute the cohension. Compute the direction which is towards the center of adjacent crowds.
+        Theta = self.Theta[:]
 
-        Parameters:
-        ---
-        WxA: interaction matrix .* adjacent node matrix
+        WAlignment   = np.ones((n,n)) # aligment weight matrix
 
-        Return:
-        ---
-        The result direction of cohesion, whose size is (n x 2) . Each row of the matrix, (x,y), is unitized. 
-        '''
-        n = self.n
-        WCohesion = np.ones((n,n))
-        dx = -dx # please pay attention to these direction
-        dy = -dy
-
-        dxC = ((WxA*WCohesion*dx).sum(axis = 1)/di).reshape(n,1)
-        dyC = ((WxA*WCohesion*dy).sum(axis = 1)/di).reshape(n,1)
-
-        VeC = np.hstack((dxC, dyC))
-        # unitize
-        VeCSqrt = np.sqrt(((VeC*VeC).sum(axis=1)).reshape(n,1))
-        VeC = np.divide(VeC,VeCSqrt,where= VeCSqrt!=0)
-        return VeC
+        detaTheta = -Theta.reshape((n,1))+Theta.reshape((1,n)) # i, j is \theta j - theta i
+        #dtatTheta \in [-2pi,2pi]
         
-    def separation(self, WxA, dx, dy, distance):
-        '''
-        Compute the separation. Compute the direction which is away from adjacent neighbours
+        detaTheta = detaTheta*((detaTheta<=np.pi)*(detaTheta>-np.pi)) + (((detaTheta-2*np.pi)*(detaTheta>np.pi))) + (((detaTheta+2*np.pi)*(detaTheta<=-np.pi)))#也可以用取余来操作
+        #dtatTheta \in [-pi,pi]
 
-        Parameters:
-        ---
-        WxA: 
-            interaction matrix .* adjacent node matrix (n x n)
-        dx:
-            distance in x (n x n)
-        dy:
-            distance in y (n x n)
-        distance: 
-            distance between different units (n x n)
-
-
-        Return:
-        ---
-        The result direction of separation, whose size is(n x 2) . Each row of the matrix, (x,y), is unitized. 
-        '''
-        n = self.n
-        WSeperation = np.divide(1, np.abs(distance)**3 , where= (np.abs(distance)**3)!=0) # separation weight matrix (n x n)
-
-        # dxS means dx Seperation
-        dxS = ( WxA*WSeperation *dx).sum(axis = 1).reshape(n,1) # sum the weighted dx 
-        dyS = ( WxA*WSeperation *dy).sum(axis = 1).reshape(n,1)
-        # print("WSeperation:\n",WSeperation)
-
-        VeS = np.hstack((dxS, dyS))
-        # print(VeS)
+        ThetaA = WxA*WAlignment*detaTheta #\inc\theta_i
+        total_weight = np.sum(WxA,axis=1).reshape((n,1))
+        ThetaA = np.divide(ThetaA, total_weight, where = total_weight>0)
+        # print("hollo1\n",ThetaA)
+        nonlinearThetaA = tanh(ThetaA)
+        # print("hollo2\n",nonlinearThetaA)
+        ThetaASum = np.sum(nonlinearThetaA,axis=1)
+        ThetaInfluence = nonlinearThetaA
         
-        # # unitize
-        VeSSqrt = np.sqrt(((VeS*VeS).sum(axis=1)).reshape(n,1))
-        VeS = np.divide(VeS,VeSSqrt,where= VeSSqrt!=0)
-        return VeS
+        self.angleInformationSaved[:,:,self.now] = ThetaInfluence[:,:]
+        return ThetaASum
+
+  
 
     def update(self):
         '''
@@ -410,16 +450,23 @@ class Vicsek():
         
         dx = np.subtract.outer(self.Po[:, 0], self.Po[:, 0])
         dy = np.subtract.outer(self.Po[:, 1], self.Po[:, 1]) 
+        # distance = np.hypot(dx, dy)
+
+        # periodic boundary                                          # this column increase the robust of the condition
+        # distanceTemp = np.zeros((self.n,self.n))                    
+        # distanceTemp += (dy > self.l/2) * (np.abs(dx)< self.l/2) * (np.hypot(0-dx,self.l-dy)<self.r)       *np.hypot(0-dx,self.l-dy)
+        # distanceTemp += (dy > self.l/2) * (dx< -self.l/2)        * (np.hypot(-self.l-dx,self.l-dy)<self.r) *np.hypot(-self.l-dx,self.l-dy)
+        # distanceTemp += (dy > self.l/2) * (dx> self.l/2)         * (np.hypot(self.l-dx,self.l-dy)<self.r)  *np.hypot(self.l-dx,self.l-dy)
+        # # distanceTemp += (dy < self.l/2) * (dx> self.l/2)         * (np.hypot(self.l-dx,0-dy)<self.r)       *np.hypot(self.l-dx,0-dy)        # for r < l/2 there is no problem， but for r>l/2 there will be a risk
+        # distanceTemp += (abs(dy) < self.l/2) * (dx> self.l/2)    * (np.hypot(self.l-dx,0-dy)<self.r)       *np.hypot(self.l-dx,0-dy)
+
+        # distanceTemp += distanceTemp.T
+        # distance = (distanceTemp==0)*distance + distanceTemp
+
+        dx = (abs(dx)>(self.l/2))*(self.l-abs(dx))+(abs(dx)<=(self.l/2))*abs(dx)
+        dy = (abs(dy)>(self.l/2))*(self.l-abs(dy))+(abs(dy)<=(self.l/2))*abs(dy)
         distance = np.hypot(dx, dy)
-        # periodic boundary
-        distanceTemp = np.zeros((self.n,self.n))
-        distanceTemp += (dy > self.l/2) * (np.abs(dx)< self.l/2) * (np.hypot(0-dx,self.l-dy)<self.r)       *np.hypot(0-dx,self.l-dy)
-        distanceTemp += (dy > self.l/2) * (dx< -self.l/2)        * (np.hypot(-self.l-dx,self.l-dy)<self.r) *np.hypot(-self.l-dx,self.l-dy)
-        distanceTemp += (dy > self.l/2) * (dx> self.l/2)         * (np.hypot(self.l-dx,self.l-dy)<self.r)  *np.hypot(self.l-dx,self.l-dy)
-        distanceTemp += (dy < self.l/2) * (dx> self.l/2)         * (np.hypot(self.l-dx,0-dy)<self.r)       *np.hypot(self.l-dx,0-dy)
-        distanceTemp += distanceTemp.T
-        distance = (distanceTemp==0)*distance + distanceTemp
-        
+
         
         Ax = (distance >= 0) * (distance <= self.r) # >=0是包括自己 
 
@@ -429,94 +476,137 @@ class Vicsek():
         # print(Dx)
         Lx = Dx-Ax
         Id = np.identity(self.n)
-
-        #  weight matrix
-        #  Wx is a nonnegative asymmetric matrix whose wij element determines the interaction strength that particle i exerts on particle j
+       
+       
         WxA = Ax * self.Wx
         # noise
         rng = np.random.default_rng()
-        Noises = rng.random((self.n,1))*self.yeta - self.yeta/2 #[-yeta/2, yeta/2]
 
+        Noises = rng.random((self.n,1))*self.eta - self.eta/2 #[-eta/2, eta/2]
 
-        '''
-        When the past will not influence the futher, the influence of past will be replaced by noises. Four situations [3].  Defalt: situation D. 
-        '''
-        # A
-        # ThetaRandom = rng.random((self.n,1))*2*np.pi
-        # self.Ve[:,:]  = np.hstack((self.v*np.cos(ThetaRandom[:]),self.v*np.sin(ThetaRandom[:])))
-        # B
-        # ThetaRandom = rng.random((self.n,1))*2*np.pi
-        # self.Ve[0:self.leaderNum+1, :]  = np.hstack((self.v*np.cos(ThetaRandom[0:self.leaderNum+1]),self.v*np.sin(ThetaRandom[0:self.leaderNum+1])))
-        # C
-        # ThetaRandom = rng.random((self.n,1))*2*np.pi
-        # self.Ve[self.leaderNum+1:, :]  = np.hstack((self.v*np.cos(ThetaRandom[self.leaderNum+1:]),self.v*np.sin(ThetaRandom[self.leaderNum+1:])))
-        # D
-        # default
-
-        leaderNum = self.leaderNum
         # calculate
+        
+        
         #angle
-        VeA = self.alignment(WxA=WxA)                                   #alignment
-        VeS = self.separation(WxA=WxA, dx=dx, dy=dy, distance=distance) #separation
-        VeC = self.cohesion(WxA=WxA, dx=dx, dy=dy, di=di)               #cohesion
-        # VeCombination = self.Ve + 1.5* VeA + 1.25* VeS + 1.3*VeC
-        # VeCombination = self.Ve + 1.5* VeA + 1.2* VeS + 1.4*VeC
-        VeCombination =  1* VeA + 0* VeS + 0*VeC # original alignment (vicsek)
 
-        # except the leaders
-        self.Theta[leaderNum+1:] = np.arctan2(VeCombination[leaderNum+1 :,1].reshape(self.n-leaderNum-1,1),VeCombination[leaderNum+1:,0].reshape(self.n-leaderNum-1,1))                                  
-        # if self.now> 1000:
-        #     self.Theta[leaderNum+1:] = np.arctan2(VeCombination[leaderNum+1 :,1].reshape(self.n-leaderNum-1,1),VeCombination[leaderNum+1:,0].reshape(self.n-leaderNum-1,1))                                  
-        # else:
-        #     self.Theta[leaderNum+1:] = self.Theta[leaderNum+1:] + Noises[leaderNum+1:]*2
+        # # different interaction modes
+        # #A    
+        # dTheta = self.alignment(WxA=WxA, distance=distance)#alignment                            #alignment
+        # self.Theta = self.Theta + dTheta.reshape((self.n,1))
+
+        #A'
+        if self.now%2==0:
+            rng = np.random.default_rng()
+            self.Theta = rng.random((self.n,1))*2*np.pi - np.pi/2
+            dTheta = self.alignment(WxA=WxA, distance=distance) #alignment
+            self.Theta = self.Theta + dTheta.reshape((self.n,1))
+        else:
+            dTheta = self.alignment(WxA=WxA, distance=distance) #alignment
+            self.Theta = self.Theta + dTheta.reshape((self.n,1))
+
         
         # add noises
         self.Theta = self.Theta + Noises
+        # self.Theta[:self.indexOfLeader+1] += Noises[:self.indexOfLeader+1]
+        # self.Theta[:self.indexOfLeader+1] -= Noises[:self.indexOfLeader+1] # exclude the noise of leader
+
         # leader control
-        self.Theta= self.update_Leader_Control(Noises)
+        self.Theta= self.update_Leader_Control()
         # interval range of angle->[0,2*pi)
         self.Theta = np.mod(self.Theta, 2 * np.pi)
         
         # speed remains unchanged
         # velocity
         self.Ve = np.hstack((self.v*np.cos(self.Theta),self.v*np.sin(self.Theta)))
+        # self.Ve = np.hstack((self.v*np.cos(self.Theta)+Noisesx,self.v*np.sin(self.Theta)+Noisesy))########################
+
+
+        self.Theta = np.arctan2(self.Ve[:,1].reshape(self.n,1),self.Ve[:,0].reshape(self.n,1))###############3
+        # interval range of angle->[0,2*pi)
+        self.Theta = np.mod(self.Theta, 2 * np.pi)########################
+
         # position
+        # self.realX = self.realX +self.Ve[0:self.indexOfLeader+1,0] * self.timeResolution#!!!!!!!跟sin有关
         self.Po  = self.Po + self.Ve * self.timeResolution # 1 means time
         self.Po = np.mod(self.Po, self.l)
         
-        return self.Po, self.Theta, Ax
+        return self.Po, self.Theta, Ax, Noises
+
 
 
 #=====================================================leader init
-    def leader_Init(self,leaderIndex):
+    def leader_Init(self,indexOfLeader):
         '''
         leader init
         init the position, the velocities, and the angle.
 
         Parameters:
         ---
-        leaderIndex: the largest index of the leader, start from 0.
+        indexOfLeader: the largest index of the leader, start from 0.
 
         '''
+
+        indexOfLeader = self.indexOfLeader
+        fps = 20
+        timeResolution = 1/fps
+        v = self.v
+        indexOfLeader=self.indexOfLeader
+        
+
+        #two rotation 
+        # rStar = [1.5,-1.5]
+        # self.Po[0,:]=[self.l/4+np.abs(rStar[0]),self.l/2]
+        # self.Po[1,:]=[self.l*3/4-np.abs(rStar[1]),self.l/2]
+
+        # self.Ve[0,:]=[0,1]
+        # self.Ve[1,:]=[0,1]
+        #     #follower design
+        # self.Po[2,:]= [self.l*2/5,self.l/2]
+        
+        # self.Po[3,:]= [self.l/2,0]
+        # self.Ve[3,:]= [0,1]
+
+
+
+
+
+        #     self.Theta[i] = np.arctan2(self.Ve[i,1].reshape(1,1),self.Ve[i,0].reshape(1,1))
+        
+        # self.realX = self.Po[0:indexOfLeader+1,0]
         # Rotation
         # r = 3
-        # dTheta = 2*np.pi/(leaderIndex+1)
-        # for i in range(leaderIndex+1):
+        # dTheta = 2*np.pi/(indexOfLeader+1)
+        # for i in range(indexOfLeader+1):
         #     self.Po[i,:]=[self.l/2+r*np.cos(np.pi/2+dTheta*i),self.l/2+r*np.sin(np.pi/2+dTheta*i)]
         #     self.Ve[i,:]=[-3*np.sin(np.pi/2+dTheta*i),3*np.cos(np.pi/2+dTheta*i)]
         #     self.Theta[i] = np.arctan2(self.Ve[i,1].reshape(1,1),self.Ve[i,0].reshape(1,1))
+        
+        
+        # self.idealPosition =  self.Po[0:indexOfLeader+1,:]
+        # self.idealTheta = self.Theta[0:indexOfLeader+1]
+        # self.idealVe = self.Ve[0:indexOfLeader+1,:]
+
         #--------------
         # line
         # #nothing
         #--------------
-        #sin
+        # sin
         # fakeAmplitude = 2
         # frequency = 0.5
-        # # # Theta[0:self.leaderNum+1] = np.arctan(amplitude *np.cos(2*np.pi*frequency*t))
-        # self.Theta[0:self.leaderNum+1] = np.arctan(fakeAmplitude *np.cos(2*np.pi*frequency*0))
+        # # Theta[0:self.indexOfLeader+1] = np.arctan(amplitude *np.cos(2*np.pi*frequency*t))
+        # self.Theta[0:self.indexOfLeader+1] = np.arctan(fakeAmplitude *np.cos(2*np.pi*frequency*0))
+
+
+        # a = 0
+        # self.Theta[0:self.indexOfLeader+1] = ((-1)**(int(a/np.pi)) *a)%np.pi -np.pi/2
+
+            #new sin
+        # x = self.realX
+        # tau = timeResolution
+        # self.Theta[0:indexOfLeader+1] = np.arctan(np.cos(x+((v*tau**2)/(1+np.cos(x)**2))**0.5))
         pass
 
-    def update_Leader_Control(self,Noises):        
+    def update_Leader_Control(self):        
         '''
         Control the movement of leader.
 
@@ -530,146 +620,191 @@ class Vicsek():
         # we describe the movement with parametric equation about time t.
 
         Theta = self.Theta
-        leaderNum = self.leaderNum 
+        indexOfLeader = self.indexOfLeader 
         timeResolution = self.timeResolution
-        Theta[0:leaderNum+1] = Theta[0:leaderNum+1] -Noises[0:leaderNum+1] # eliminate the noises 
-        # rotation
+        v = self.v
+        Po = self.Po
+        l = self.l
+      
+
+        # if self.now>2000:
+        #     Theta[0:indexOfLeader+1] = Theta[0:indexOfLeader+1] -Noises[0:indexOfLeader+1] # eliminate the noises 
+
+        #     # rotation
+            
+        #     # r = self.r/np.sin(np.pi/self.n)
+        #     # rStar = [-1,1]
+        #     # for i in range(indexOfLeader+1):
+        #     #     Theta[i] = Theta[i] + self.v*timeResolution/rStar[i] + Noises[i]# dtheta = v*dt/r
+        #     r=3
+        #     Theta[0:indexOfLeader+1] = Theta[0:self.indexOfLeader+1] + self.v*timeResolution/r + Noises[0:indexOfLeader+1]# dtheta = v*dt/r
         
-        # r = 3
-        # Theta[0:leaderNum+1] = Theta[0:self.leaderNum+1] + self.v*timeResolution/r  # dtheta = v*dt/r
+
+        # milling
+            
+
+
+        # rStar = self.rstar[:]
+        # for i in range(indexOfLeader+1):
+        #     Theta[i] = Theta[i] + self.v*timeResolution/rStar[i]# dtheta = v*dt/、
+
         
+        
+        # idealTheta = self.idealTheta
+        # idealPosition = self.idealPosition
+        # idealVe = self.idealVe
+        # idealTheta = idealTheta + self.v*timeResolution/r
+        # idealVe = np.hstack((self.v*np.cos(idealTheta),self.v*np.sin(idealTheta)))
+        # idealPosition = idealPosition + idealVe* self.timeResolution 
+        # alphaTheta = np.arctan2((idealPosition[:,1]- Po[0:self.indexOfLeader+1,1]),(idealPosition[:,0]- Po[0:self.indexOfLeader+1,0]))
+
+        # Theta[0:self.indexOfLeader+1] = Theta[0:self.indexOfLeader+1]+ np.sin(alphaTheta.reshape(self.indexOfLeader+1,1)-Theta[0:self.indexOfLeader+1])+ Noises[0:indexOfLeader+1]
+        # # Theta[0:self.numOfLeaders+1] = Theta[0:self.numOfLeaders+1]+ alphaTheta-Theta[0:self.numOfLeaders+1]+ Noises[0:numOfLeaders+1]
+
+        # self.idealTheta = idealTheta
+        # self.idealPosition =idealPosition
+        # self.idealVe = idealVe
+
+
+
         #----------------
         #line
-        
-        Theta[0:self.leaderNum+1] = np.pi/3
+
+
+
+        # Theta[0:self.indexOfLeader+1] = np.pi/4
         
         #------------
         # sin wave
-        # Theta[0:self.leaderNum+1] = np.arctan(np.cos(0.05*self.now))
-        # t = (self.VelocitySaved[:leaderNum+1,1,:self.now] * np.cos(self.ThetaSaved[:leaderNum+1,:self.now])).sum() 
-        # Theta[0:self.leaderNum+1] = np.arctan(np.cos(2*np.pi*1*t))
+        
         # t = self.now *self.timeResolution
         # fakeAmplitude = 2
         # frequency = 0.5
-        # # # Theta[0:self.leaderNum+1] = np.arctan(amplitude *np.cos(2*np.pi*frequency*t))
-        # Theta[0:self.leaderNum+1] = np.arctan(fakeAmplitude *np.cos(2*np.pi*frequency*t))
+        # # Theta[0:self.indexOfLeader+1] = np.arctan(amplitude *np.cos(2*np.pi*frequency*t))
+
+        # Theta[0:self.indexOfLeader+1] = np.arctan(fakeAmplitude *np.cos(2*np.pi*frequency*t))
+        
+            #new sin
+        # x = self.realX
+        # tau = timeResolution
+        # Theta[0:self.indexOfLeader+1] = np.arctan(np.cos(x+((v*tau**2)/(1+np.cos(x)**2))**0.5))
+
 
         return Theta
-
     
-    
-        
-
-
 
 
 if __name__ == "__main__":
 
-
-    # Vicsek(sizeOfArena= 10.0, number= 200, leaderNum=10, wLF=5, speed=.1, senseRadius=1.5, noises=0.2, name="vicsek").start(stepNum=100)
-    #rotation
-    # Vicsek(sizeOfArena= 10, number=100, leaderNum=8, wLF=5, speed=.1, senseRadius=1.5, noises=0.2, name="vicsek").start(stepNum=1000)
-    #line
-    # Vicsek(sizeOfArena= 10, number=100, leaderNum=3, wLF=5, speed=.1, senseRadius=1.5, noises=0.2, name="vicsek").start(stepNum=1000)
-    #sin
-    # Vicsek(sizeOfArena= 10, number=100, leaderNum=8, wLF=5, speed=2, senseRadius=1.5, noises=0.2, name="vicsek").start(stepNum=1000)
-    # Vicsek(sizeOfArena= 10, number=100, leaderNum=8, wLF=5, speed=2, senseRadius=2, noises=0.2, name="vicsek").start(stepNum=1000)
-    # Vicsek(sizeOfArena= 10, number=100, leaderNum=8, wLF=5, speed=3, senseRadius=1.5, noises=0.2, name="vicsek").start(stepNum=1000)
+    '''
+    please check what type the module is
+    now: different leader, different w_LF 
+    '''
+    numberOfLeaders = 1 #number Of Leaders 3
+    numberofUnits = 49 + numberOfLeaders #number Of Units, 10 is the number of followers 7
+    sizeArea = 10
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=5, speed=2, senseRadius=5 , noises=0.3*np.pi, name="vicsek").start(numOfSteps=1000)# noises were added to the velocity
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=5, speed=2, senseRadius=3 , noises=2/3*np.pi, name="vicsek").start(numOfSteps=131072)# noises were added to the velocity
+    noises = 0.1*np.pi
+    # print(noises/3.14*180)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.1, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_0.1").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.3, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_0.3").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.5, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_0.5").start(numOfSteps=131072)  
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.7, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_0.7").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.9, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_0.9").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.1, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_1.1").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.3, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_1.3").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.5, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_1.5").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=2.5, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_2.5").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=3.5, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_3.5").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=4.5, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_4.5").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=6.0, speed=2, senseRadius=4.5, noises=noises,  name="vicsek_6.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=10., speed=2, senseRadius=4.5, noises=noises,  name="vicsek_10.").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.2, speed=2, senseRadius=4.5, noises=noises, name="vicsek_0.2").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.4, speed=2, senseRadius=4.5, noises=noises, name="vicsek_0.4").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.6, speed=2, senseRadius=4.5, noises=noises, name="vicsek_0.6").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=0.8, speed=2, senseRadius=4.5, noises=noises, name="vicsek_0.8").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.0, speed=2, senseRadius=4.5, noises=noises, name="vicsek_1.0").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.2, speed=2, senseRadius=4.5, noises=noises, name="vicsek_1.2").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.4, speed=2, senseRadius=4.5, noises=noises, name="vicsek_1.4").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=2.0, speed=2, senseRadius=4.5, noises=noises, name="vicsek_2.0").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=3.0, speed=2, senseRadius=4.5, noises=noises, name="vicsek_3.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=4.0, speed=2, senseRadius=4.5, noises=noises, name="vicsek_4.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=5.0, speed=2, senseRadius=4.5, noises=noises, name="vicsek_5.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=8.0, speed=2, senseRadius=4.5, noises=noises, name="vicsek_8.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=15., speed=2, senseRadius=4.5, noises=noises, name="vicsek_15.").start(numOfSteps=131072) 
     
-    Vicsek(sizeOfArena= 10, number=100, leaderNum=1, wLF=5, speed=2, senseRadius=1.5, noises=0.2, name="vicsek").start(stepNum=1000)
+             
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.0, speed=2, senseRadius=5, noises=noises, name="vicsek_1.0").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.2, speed=2, senseRadius=5, noises=noises, name="vicsek_1.2").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.4, speed=2, senseRadius=5, noises=noises, name="vicsek_1.4").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=2.0, speed=2, senseRadius=5, noises=noises, name="vicsek_2.0").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=3.0, speed=2, senseRadius=5, noises=noises, name="vicsek_3.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=4.0, speed=2, senseRadius=5, noises=noises, name="vicsek_4.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=5.0, speed=2, senseRadius=5, noises=noises, name="vicsek_5.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=8.0, speed=2, senseRadius=5, noises=noises, name="vicsek_8.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=15., speed=2, senseRadius=5, noises=noises, name="vicsek_15.").start(numOfSteps=131072) 
+    
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.1, speed=2, senseRadius=5, noises=noises,  name="vicsek_1.1").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.3, speed=2, senseRadius=5, noises=noises,  name="vicsek_1.3").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=1.5, speed=2, senseRadius=5, noises=noises,  name="vicsek_1.5").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=2.5, speed=2, senseRadius=5, noises=noises,  name="vicsek_2.5").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=3.5, speed=2, senseRadius=5, noises=noises,  name="vicsek_3.5").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=4.5, speed=2, senseRadius=5, noises=noises,  name="vicsek_4.5").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=6.0, speed=2, senseRadius=5, noises=noises,  name="vicsek_6.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=10., speed=2, senseRadius=5, noises=noises,  name="vicsek_10.").start(numOfSteps=131072) 
+   
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=20., speed=2, senseRadius=5, noises=(0.3)*np.pi, name="vicsek_20.").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=25., speed=2, senseRadius=5, noises=(0.3)*np.pi, name="vicsek_25.").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=30., speed=2, senseRadius=5, noises=(0.3)*np.pi, name="vicsek_30.").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=40., speed=2, senseRadius=5, noises=(0.3)*np.pi, name="vicsek_40.").start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=3, noises=0.6*np.pi, name="vicsek_3.0").start(numOfSteps=1000) 
+
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=4, noises=0.4*np.pi, name="vicsek_3.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=3, noises=1.0*np.pi, name="vicsek_3.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=3, noises=1.4*np.pi, name="vicsek_3.0").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=3, noises=2.0*np.pi, name="vicsek_3.0").start(numOfSteps=131072) 
+   
+   #to borden the synergistic 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0,5.0], speed=2, senseRadius=8, noises=0.3*np.pi, name="vicsek").start(numOfSteps=1000) 
+
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0,5.0], speed=2, senseRadius=8, noises=0.3*np.pi, name="vicsek").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0,5.0], speed=2, senseRadius=8, noises=0.3*np.pi, name="vicsek").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0,5.0], speed=2, senseRadius=8, noises=0.3*np.pi, name="vicsek").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=0.3*np.pi, name="vicsek").start(numOfSteps=1000) 
 
 
-
-    '''
-    the number of leaders
-
-    '''
-
-    # numberOfLeaderList = [3,5,8]
-    # for i in numberOfLeaderList:
-    #     numberList = np.array([60, 100]) # number
-    #     for j in numberList:
-    #         Vicsek(sizeOfArena= 10.0, number= j, leaderNum=i,  wLF=3, speed=.1, senseRadius=1.5, noises=0.3, name="vicsek_i = :"+str(i)+"_j = :"+str(j)).start(stepNum=1000)
-    #         Vicsek(sizeOfArena= 10.0, number= j, leaderNum=i,  wLF=3, speed=.1, senseRadius=0.5, noises=0.3, name="vicsek_i = :"+str(i)+"_j = :"+str(j)).start(stepNum=1000)
+   # varying with eta
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*0.1, name="vicsek_.1").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*0.5, name="vicsek_.5").start(numOfSteps=131072) 
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*0.8, name="vicsek_.8").start(numOfSteps=131072) 
+# 
+    for i in range(7):
+        # Vicsek(sizeOfArena= sizeArea, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(i)*0.1, name="vicsek_ata_"+str((i)*0.1)).start(numOfSteps=131072)
+        # Vicsek(sizeOfArena= sizeArea, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(i+7)*0.1, name="vicsek_ata_"+str((i+7)*0.1)).start(numOfSteps=131072)
+        Vicsek(sizeOfArena= sizeArea, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(i+14)*0.1, name="vicsek_ata_"+str((i+14)*0.1)).start(numOfSteps=131072)
+        # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=5, speed=2, senseRadius=5, noises=np.pi*(i+16)*0.1, name="vicsek_ata_"+str((i+16)*0.1)).start(numOfSteps=131072)
+    
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(4)*0.1, name="vicsek_ata_"+str((3)*0.1)).start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(7)*0.1, name="vicsek_ata_"+str((4)*0.1)).start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(9)*0.1, name="vicsek_ata_"+str((5)*0.1)).start(numOfSteps=131072)
+    # # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(11)*0.1, name="vicsek_ata_"+str((6)*0.1)).start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(13)*0.1, name="vicsek_ata_"+str((13)*0.1)).start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(16)*0.1, name="vicsek_ata_"+str((16)*0.1)).start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(17)*0.1, name="vicsek_ata_"+str((17)*0.1)).start(numOfSteps=131072)
+    # Vicsek(sizeOfArena= 10.0, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[5.0], speed=2, senseRadius=5, noises=np.pi*(19)*0.1, name="vicsek_ata_"+str((19)*0.1)).start(numOfSteps=131072)
+   
     
     
-    
-    '''
-    数量,one leader
-    '''
-    # numberList = [3,6,10,20,45,60,100] # number
-    # wLFList = [1,3,5,10,15] # interaction strength
-    # for j in wLFList:
-    #     for i in numberList:
-    #         # Vicsek(sizeOfArena= 10.0, number= i, leaderNum=1,  wLF=j, speed=.1, senseRadiu=3, noises=0.2, name="vicsek_number:"+str(i)+"_wLf:"+str(j)).start(stepNum=1000)
-    #         Vicsek(sizeOfArena= 10.0, number= i, leaderNum=1,  wLF=j, speed=.1, senseRadiu=3, noises=0.2, name="vicsek_number:"+str(i)+"_wLf:"+str(j)).start(stepNum=1000)
-    
+    # numberofUnits = 200 + numberOfLeaders #number Of Units, 10 is the number of followers 7
+    # sizeArea = 14.1
 
-    '''
-    作用半径与尺度的关系
-    
-    1. 改变尺寸
-    2. 改变作用半径
-    '''
-    #1.
-    # sizeList = [1,2,4,6,10] # 倍数
-
-    # for i in sizeList:
-    #     numberList = np.array([3,10,30,60,100])*i # number
-    #     for j in numberList:
-    #         Vicsek(sizeOfArena= 10.0*i, number= j, leaderNum=1,  wLF=3, speed=.1, senseRadius=3, noises=0.2, name="vicsek_number:"+str(i)+"_wLf:"+str(j)).start(stepNum=1000)
-
-    #2.
-    # rList = [0.1, 0.5, 1.0, 1.5, 3. ,5.] # 倍数
-
-    # for i in rList:
-    #     numberList = np.array([3,10,30,60,100]) # number
-    #     for j in numberList:
-    #         Vicsek(sizeOfArena= 10.0, number= j, leaderNum=1,  wLF=3, speed=.1, senseRadius=i, noises=0.2, name="vicsek_i = :"+str(i)+"_j = :"+str(j)).start(stepNum=1000)
-    
-    '''
-    wlf:
-
-    '''
-    # wLFList = [1,3,5,10,15] # interaction strength
-
-    # for i in wLFList:
-    #     Vicsek(sizeOfArena= 10.0, number= 100, leaderNum=1,  wLF=i, speed=.1, senseRadius=1.5, noises=0.2, name="vicsek_i:"+str(i)+" _j:"+str(1.5)).start(stepNum=1000)
-    #     Vicsek(sizeOfArena= 10.0, number= 100, leaderNum=1,  wLF=i, speed=.1, senseRadius=3, noises=0.2, name="vicsek_i:"+str(i)+" _j:"+str(3)).start(stepNum=1000)
-    
-    
-    '''
-    噪声
-    '''
-    # noisesList = np.arange(1,21)*0.1*np.pi# 倍数
-
-    # for i in noisesList:
-    #     numberList = np.array([3,30,100]) # number
-    #     for j in numberList:
-    #         Vicsek(sizeOfArena= 10.0, number= j, leaderNum=1,  wLF=3, speed=.1, senseRadius=1.5, noises=i, name="vicsek_i = :"+str(i)+"_j = :"+str(j)).start(stepNum=1000)
+    # for i in range(7):
+    #     # Vicsek(sizeOfArena= sizeArea, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[1], speed=2, senseRadius=1, noises=np.pi*(i)*0.1, name="vicsek_ata_"+str((i)*0.1)).start(numOfSteps=8000)
+    #     Vicsek(sizeOfArena= sizeArea, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[1], speed=2, senseRadius=1, noises=np.pi*(i+7)*0.1, name="vicsek_ata_"+str((i+7)*0.1)).start(numOfSteps=8000)
+    #     Vicsek(sizeOfArena= sizeArea, number=numberofUnits, numOfLeaders=numberOfLeaders, wLF=[1], speed=2, senseRadius=1, noises=np.pi*(i+14)*0.1, name="vicsek_ata_"+str((i+7)*0.1)).start(numOfSteps=8000)
 
     
-    
-    '''
-    噪声和wlf
-    '''
-    # wlfList = [10, 6.8, 4.6, 3.2, 2.2, 1.5, 1.0]
-    # wlfList = [3.2]
-    # noise
-    # for j in wlfList:
-    #     wlf = j
-    #     for i in range(11):
-    #         yeta = i * 0.2* np.pi
-    #         Vicsek(sizeOfArena= 10.0, number= 10, leaderNum=1, wLF=j, speed=.05, senseRadiu=3, noises=yeta, name="vicsek_yeta:"+str(yeta)+"_wLF:"+str(wlf)).start()
-    #     pass
-    
-    '''
-    速度
-    '''
-    #速度太快肯定不行
-
-
-
 '''
 [1] Vicsek, T., Czirók, A., Ben-Jacob, E., Cohen, I. & Shochet, O. Novel Type of Phase Transition in a System of Self-Driven Particles. Phys. Rev. Lett. 75, 1226-1229 (1995).
 [2] Cucker, F. & Smale, S. Emergent Behavior in Flocks. IEEE Trans. Automat. Contr. 52, 852-862 (2007).
