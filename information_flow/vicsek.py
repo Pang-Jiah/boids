@@ -4,7 +4,6 @@
 # ending time: ~
 # python: 3.6
 
-
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -207,8 +206,8 @@ if __name__=="__main__":
     number_of_influencer = 1 # number of influencer
     size_of_arena = 10 # he linear size of the squrae shape cell where simulations are carried out
     speed = 2 # speed of particles
-    sense_radius = 5 # the radius that one particles can sense
-    eta = 0.3*np.pi # eta, the noise strength
+    sense_radius = 3 # the radius that one particles can sense
+    eta = 0.2*np.pi # eta, the noise strength
     rng = np.random.default_rng() #
     # init Position P
     position = rng.random((number_of_particles,2))*size_of_arena # random()-> float interval [0,1]
