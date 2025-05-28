@@ -1,311 +1,141 @@
-# vicsek model simulation [1]
-# Under developing
-# authority: Pang Jiahuan
-# start time: 2022/11/7
-# last time: 2022/11/15
-# end time: ~
-# python: 3.6
+'''
+Function for Vicsek model simulation
 
 '''
-vicsek model version description:
-    改成[3]中的模型，描述参考[2]，加入数据处理部分
-
-相对与上一版改进的说明：
-    取消了惯性，改用速度取平均,加入数据保存,但是这里保存只是考虑了角度值
-    结构也大改，将仿真作为类的一个方法，并将仿真数据与模型参数数据进行隔离
-    数据：角度，步数
-'''
-#考虑：
-#   1. 数学计算采用[2]的方式？还是逐个元素进行相应的计算
-#   2. 加速度的表示，注意量纲dimension (暂时不考虑惯性了)
-#   3. 各种区间边界的开闭确定： 角度， 噪声
-#   4. HDF5数据的结构 (暂不建立group, only dataset)
-#   5. 能否把控时间，而不只是仅仅考虑多少步，simulationTime step（暂时删除）存在的意义
-#   6. 把视频保存放进data_Save()函数
-#   7. 全大写的变量定义为常量，这里希望进行略微的修改(为了步保证变量，后面加入小写)
-#   ·。版本修改3.8->3.6 (numpy 在python3.8 下的一些函数竟然在 python3.6中也好使？虽然代码上没有了相应的提示符 weird)
-
 import numpy as np
 
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-
-import time
-import os
-import h5py
-import progressbar
-
-class Vicsek():
-    '''
-    class of Vicsek model, each class is a group of Vicsek model
-
-    Parameters
-    --
-    >>> sizeOfArena: float ( default: )
-            the linear size of the squrae shape cell where simulations are carried out. 
-    >>> number: int  ( default: )
-            the number of units. 
-    >>> speed: float ( default: )
-            speed of the units(constant temporarily).
-    >>> senseRadiu: float ( default: )
-            the radius that an unit can feel.
-    >>> noises: float ( default: )
-            the strength of noises
-    >>> name: str (default: vicsek)
-            name of viscek model.
-
-    >>> hello vicsek
-
-    '''
-    '''
-    Notation
-    --
-        # l: the simulations are carried out in a square shape cell of linear size L 1x1 场地大小
-        # n: n units 1x1 个数
-        # v: value of the velocities of the units  1x1 速度大小
-        # Theta: directions nx1 角度(每个unit运动的不同)
-        # Vo: velocities of the units nx2
-        # Po: matrix of the positions of the units n x 2 x stepNum 位置矩阵
-        # r: the radius that an unit can feel 1x1 所感知的半径
-        # yeta: the strength of the noises 1x1 噪声
-    大小写规范问题:小写为数值，大写开头为矩阵
-
-    '''
-    def __init__(self, sizeOfArena: float, number: int, speed: float, senseRadiu: float,noises: float, name: str = "vicsek" ) -> None:
-        self.name = name
-        print(name," is born")
-        
-        #####
-        self.parameters_Init(sizeOfArena,number,speed,senseRadiu,noises) #init parameters
-        
-
-        pass
+def modulo(x):
+    '''contrain the angle of orientation within (-pi, pi]'''
     
-    def parameters_Init(self, sizeOfArena: float, number:int, speed: float, senseRadiu: float, noises: float) -> None:
+#     x = x%(2*np.pi)
+#     if x > np.pi:
+#         x = x - 2*np.pi
+    
+    return x - 2 * np.pi * np.ceil((x - np.pi) / (2 * np.pi))
+
+
+
+def alignment(number_of_particles:int, theta:np.ndarray, WxA:np.ndarray):
         '''
-        Init parameters
-
-        Parameters
-        --
-        >>> sizeOfArena: float ( default: )
-                the linear size of the squrae shape cell where simulations are carried out. 
-        >>> number: int  ( default: )
-                the number of units. 
-        >>> speed: float ( default: )
-                speed of the units(constant temporarily).
-        >>> senseRadiu: float ( default: )
-                the radius that an unit can feel.
-        >>> noises: float ( default: )
-                the strength of noises.
-
-        '''
-        self.l = sizeOfArena
-        self.n = number
-        self.v = speed
-        self.r = senseRadiu
-        self.yeta = noises
-        # init Position P
-        rng = np.random.default_rng()
-        self.Po = rng.random((self.n,2))*self.l
-        # init angle   Theta        0~2*pi but what is 
-        self.Theta = rng.random((self.n,1))*2*np.pi 
-        # init Velocity  V    
-        self.Vo = np.hstack((self.v*np.cos(self.Theta),self.v*np.sin(self.Theta)))
-
+        Compute the alignment (influence).
         
-        pass
-
-
-#================== animation part
-
-    def start(self) -> None:
-        '''
-        start the simulation
-        
-        Parameters:
-        '''
-        self.simulation_Init() # init file and folder 
-
-        fig = plt.figure() # 
-        plt.quiver(self.Po[:,0],self.Po[:,1],self.Vo[:,0],self.Vo[:,1])
-        ani = animation.FuncAnimation(fig=fig, func=self._move, frames=self.stepNum-1, interval=20, blit=False, repeat=False) # frams-1是因为frame会传两个参数0
-        plt.xlim((0, self.l))
-        plt.ylim((0, self.l))
-        ani.save('./vicsek.gif', fps=20)
-        self.pbar.finish()
-        print(":) \"Video is saved successfully.\"",self.name,"said")
-        self.data_Save()
-        print(":) \"Data is saved successfully.\"",self.name,"said")
-        # plt.show()
-
-    def simulation_Init(self):
-        '''
-        Init things which are used for simulation
-
-        Section
-        --
-        >>> step (time) init
-        >>> space init
-        >>> progressbar init
-        >>> file init: folder and hdf5 file 
-
-        '''
-
-        # step (time) init
-        #------------
-        # self.simulationTime = 10 # the duration of the simulation, unit: second
-        # self.step = 0.1 # the duration of the step
-        # self.stepNum = int(self.simulationTime/self.step)
-        self.stepNum = 100
-        self.now = 0 # record what the step is now, start from 0~(stepNum-1)
-        
-        # space init
-        #----------------
-        # space for data to be saved
-        self.ThetaSaved = np.zeros((self.n, self.stepNum))
-
-        # progressbar init
-        #------------
-        widgets = ['Progress: ',progressbar.Percentage(), ' ', progressbar.Bar('#'),' ', progressbar.Timer(),
-           ' ', progressbar.ETA(), ' ', progressbar.FileTransferSpeed()]
-        self.pbar = progressbar.ProgressBar(widgets=widgets, max_value=self.stepNum).start()
-        # self.pbar = progressbar.ProgressBar().start()
-
-        #file init
-        #-----------
-        # init folder
-        now = time.localtime()
-        timeStr = time.strftime("%Y-%m-%d_%H-%M-%S",now)
-        self.folderName = timeStr + '_' + str(self.n) + 'units_' + \
-                    str(self.stepNum) + 'StepNumber_' + \
-                    str(self.yeta) + 'Noise_' + \
-                    str(self.l) + 'size_' + \
-                    str(self.v) + 'speed'
-        self.mypath = os.path.split(__file__)[0]
-        os.chdir(self.mypath)
-        if not os.path.isdir(self.folderName):
-            os.mkdir(self.folderName)
-        os.chdir(self.folderName) 
-
-
-        # init file
-        fileName = "vicsekData.hdf5"
-        self.file = h5py.File(fileName, 'w-')
-
-
-    def data_Save(self):
-        '''
-        save data
-        '''
-        stepNum = np.array([self.stepNum])
-        self.file.create_dataset('angleSaved', data=self.ThetaSaved, compression='gzip', compression_opts=9)
-        self.file.create_dataset('stepNum', data=stepNum, compression='gzip', compression_opts=9)
-        self.file.close()
-        os.chdir("..")
-        pass
-
-
-
-    def _move(self, frameNumber):
-        '''
-        # WARN!!!!!!!!!!
-        do not touch easily
-        由动画函数自动调用
-
         Parameters:
         ---
-            frameNumber: 
-                the number of the frame, 
-        '''
-        # print("\n___framsjlasjldjla",self.now)
-        Po, Theta = self.update()
-        self.ThetaSaved[:,self.now] = Theta.reshape((self.n, ))
-        self.pbar.update(self.now+1)
-        self.now +=1
-        plt.cla()
-        plt.xlim((0, self.l))
-        plt.ylim((0, self.l))
-        plt.quiver(Po[:,0],Po[:,1],self.Vo[:,0],self.Vo[:,1])
-        pass
-
-
-    #================ update data
-
-    def update(self):
-        '''
-        # Main logic
+        number_of_particles: The number of the particles
+        theta: the orientation of particels
+        WxA: interaction matrix .* adjacent matrix
         
-        update the position.        ref:[2] Emergent Behavior in Flocks
+        Return:
+        ---
+        thetaASum: the combined influence one particle receieves from the surrounding neighbors
+        theta_influnce: the influence one particle receieves from the surrounding neighbors
+
+        '''
+        n = number_of_particles
+
+        #dtattheta \in [-2pi,2pi]
+        detatheta = -theta.reshape((n,1))+theta.reshape((1,n)) # i, j is \theta j - theta i
+        
+        #dtattheta \in （-pi,pi]
+        # detatheta = detatheta*((detatheta<=np.pi)*(detatheta>-np.pi)) + (((detatheta-2*np.pi)*(detatheta>np.pi))) + (((detatheta+2*np.pi)*(detatheta<=-np.pi)))#也可以用取余来操作
+        detatheta = modulo(detatheta)
+        thetaA = WxA*detatheta 
+        total_weight = np.sum(WxA,axis=1).reshape((n,1))
+
+        thetaA = np.divide(thetaA, total_weight, where = total_weight>0) #\inc\theta_ij
+        thetaASum = np.sum(thetaA,axis=1) #\inc\theta_i
+        
+        #influence
+        theta_influence = thetaA
+        
+        return thetaASum, theta_influence
+
+
+
+def update(position:np.ndarray, theta:np.ndarray, velocity:np.ndarray, l:float, n:int, r:float, Wx:np.ndarray, eta:float, speed:float, time_resolution:float):
+        '''
+        Description
+        ---
+        
+        Calculate the position and orientation of the particles at t+ \inc t  
         
         Parameters:
+        ---
+        position: the position of particles at t (N x 2)
+        theta: the orientation of particles at t (N x 1)
+        velocity: the velocity of particles at t (N x 2)
+        l: the width of the cell 
+        n: the number of partcles (N)
+        r: sensing radius
+        Wx: interaction matrix
+        eta: noise strength
+        speed: the speed of partcles
+        time-resolution: can be roughly interpretated as \inc t
+
 
         '''
-        dx = np.subtract.outer(self.Po[:, 0], self.Po[:, 0])
-        dy = np.subtract.outer(self.Po[:, 1], self.Po[:, 1]) 
-        distance = np.hypot(dx, dy)
-        # periodic boundary
-        Ax = (distance >= 0) * (distance <= self.r) # >=0是包括自己 
-        #                                                     condition
-        Ax += (dy > self.l/2) * (np.abs(dx)< self.l/2) * (np.hypot(0-dx,self.l-dy)<self.r)
-        Ax += (dy > self.l/2) * (dx< -self.l/2)        * (np.hypot(-self.l-dx,self.l-dy)<self.r)
-        Ax += (dy > self.l/2) * (dx> self.l/2)         * (np.hypot(self.l-dx,self.l-dy)<self.r)
-        Ax += (dy < self.l/2) * (dx> self.l/2)         * (np.hypot(self.l-dx,0-dy)<self.r)#
-        Ax += Ax.T
-        # print(Ax)
-        di = np.maximum(Ax.sum(axis=1), 1) #.reshape(self.n,1)
-        Dx = np.diag(di)
-        # print(Dx)
-        Lx = Dx-Ax
-        Id = np.identity(self.n)
-        #  weight matrix
-        #  Wx is a nonnegative asymmetric matrix whose wij element determines the interaction strength that particle i exerts on particle j
-        Wx= np.ones((self.n,self.n))
-        WxA = Ax * Wx
 
+        dx = np.subtract.outer(position[:, 0], position[:, 0])
+        dy = np.subtract.outer(position[:, 1], position[:, 1]) 
+
+
+        ## periodic boundary 
+        # we have several way to achieve the periodic boundary condition
+        # method 1
+        # as we will use dx and dy to calculate the distance, therefore the sign of dx and dy does not matter.
+        # dx = (abs(dx)>(l/2))*(l-abs(dx))+(abs(dx)<=(l/2))*abs(dx) 
+        # dy = (abs(dy)>(l/2))*(l-abs(dy))+(abs(dy)<=(l/2))*abs(dy)
+        
+        #This is really time consumming on allocating space, therefore we decompose the calculation
+        # in oder to accelerate the speed, we decompose this formulation into following small ones 
+        # method 2
+        # abs_dx = abs(dx)
+        # dx10  = (abs_dx>(l/2))
+        # dx11 = (l-abs_dx)
+        # dx1 = np.where(dx10,dx11,0)
+        # dx20 = np.logical_not(dx10)
+        # dx2 = np.where(dx20,dx,0)
+        # dx = dx1 + dx2
+
+        # abs_dy = abs(dy)
+        # dy10  = (abs_dy>(l/2))
+        # dy11 = (l-abs_dy)
+        # dy1 = np.where(dy10,dy11,0)
+
+        # dy20 = np.logical_not(dy10)
+        # dy2 = np.where(dy20,dy,0)
+
+        # dy = dy1 + dy2
+
+
+        # method 3
+        # same logic
+        dx = dx - l * np.sign(dx) * (np.abs(dx) > l/2)
+        dy = dy - l * np.sign(dy) * (np.abs(dy) > l/2)
+
+        distance = np.hypot(dx, dy)
+        Ax = (distance >= 0) * (distance <= r) # adjacent matrix
+        WxA = Ax * Wx # combine adjacent matrix and interaction matrix
         # noise
         rng = np.random.default_rng()
-        Noises = rng.random((self.n,1))*self.yeta - self.yeta/2
-        
-        
-        
-        self.Theta = np.arctan2(np.matmul(WxA,self.Vo[:,1].reshape(self.n,1)),\
-                                np.matmul(WxA,self.Vo[:,0].reshape(self.n,1))+0.000000000001) 
-        self.Theta = self.Theta + Noises
+        noises = rng.random((n,1))*eta - eta/2 #[-eta/2, eta/2)
 
-        self.Theta = np.mod(self.Theta, 2 * np.pi)
-        '''
-        ps: “.” 加上运算符表示按元素进行运算
-        Theta(t+1) =  <Theta(t)> + noise              
-                                (Wx.*Ax)*Vy(t)                    
-        <Theta(t)> = arctan(  ————————————————————— )         Vx为速度x的分量, Vy同理, epsilon趋于0(防止分母为零)
-                            (Wx.*Ax)*Vx(t)+epsilon
+        # calculate
+        dTheta, theta_influence  = alignment(number_of_particles=n, theta=theta,  WxA=WxA)#alignment                
+        theta = theta + dTheta.reshape((n,1))
         
-        '''
-        # print(self.Theta)
+        # add noises
+        theta = theta + noises
+
+        # interval range of angle->(-pi,pi]
+        theta = modulo(theta)
+
         # speed remains unchanged
-        self.Vo = np.hstack((self.v*np.cos(self.Theta),self.v*np.sin(self.Theta)))
-        # print(self.Vo)
-        self.Po  = self.Po + self.Vo * 1 # 1 means time
-        # print(self.Po) 
-        self.Po = np.mod(self.Po, self.l) # 取余
-        return self.Po, self.Theta
+        # velocity
+        velocity = np.hstack((speed*np.cos(theta), speed*np.sin(theta))) 
 
-
-#%%
-if __name__ == "__main__":
-    #使用类和对象的方式，这样可以同时跑多个参数
-    vicsek = Vicsek(sizeOfArena= 100.0, number= 200, speed=.5, senseRadiu=3, noises=.05,name="vicsek_A")
-    vicsek2 = Vicsek(sizeOfArena= 100.0, number= 400, speed=.5, senseRadiu=3, noises=.05,name="vicsek_AA")
-    vicsek.start()
-    ##########
-    vicsek2.start()
-
-
-
-'''
-[1] Vicsek, T., Czirók, A., Ben-Jacob, E., Cohen, I. & Shochet, O. Novel Type of Phase Transition in a System of Self-Driven Particles. Phys. Rev. Lett. 75, 1226-1229 (1995).
-[2] Cucker, F. & Smale, S. Emergent Behavior in Flocks. IEEE Trans. Automat. Contr. 52, 852-862 (2007).
-[3] Sattari, S. et al. Modes of information flow in collective cohesion. SCIENCE ADVANCES 14 (2022).
-
-
-'''
+        # position
+        position  = position + velocity * time_resolution #
+        position = np.mod(position, l)
+        
+        return position, theta, Ax, noises, dTheta, velocity, theta_influence
