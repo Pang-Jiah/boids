@@ -489,7 +489,6 @@ def defined_influence_at(influence:np.ndarray, x:int, z:int, adjacent_matrix, st
     '''
     calculate the average influence x gives to z (for pairwise interaction)
 
-    stationary threshold which should be consist with the count_distribution_adjacent() function
     '''
     if np.sum(adjacent_matrix[z,x,start_point:stop_point]) == 0:
         influence_xz = 0
@@ -502,8 +501,6 @@ def defined_influence_at(influence:np.ndarray, x:int, z:int, adjacent_matrix, st
 def defined_influence_ta(influence:np.ndarray, x:int, z:int, adjacent_matrix, start_point, stop_point):
     '''
     calculate the average influence x gives to z (for pairwise interaction)
-
-    stationary threshold which should be consist with the count_distribution_adjacent() function
     '''
 
     if np.sum(adjacent_matrix[z,x,start_point:stop_point]) == 0:
